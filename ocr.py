@@ -10,7 +10,7 @@ from pdf2image import convert_from_path
 from PIL import Image
 from pytesseract import Output
 
-from tricks import dict_to_sqlite, run_SQL
+from tricks import dict_to_sqlite, run_SQL, most_frequent
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
@@ -76,7 +76,7 @@ def fix_image_lines(image_lines):
 		first_half = [] #anchor the first word to ensure lines are constant
 		second_half = []
 		for j in [k for k in temp_list[i] if len(k)>0]:
-			if(j['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").strip().lower().isdigit()):
+			if(j['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").replace("-","").strip().lower().isdigit()):
 				second_half.append(j)
 			else:
 				first_half.append(j)
@@ -231,38 +231,45 @@ for image_data in full_image_data:
 
 	print("Passed? " + str(passed))
 	print("___________________________________")
-	print([i['text'] for i in image_lines[-2]])
+	print([i['text'] for i in image_lines[37]])
 	print("___________________________________")
-	print([i['text'] for i in image_lines[-1]])
+	print([i['text'] for i in image_lines[38]])
 
 	for i in range(0,len(image_lines)):
-		image_lines[i] = [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").replace(",","").strip().lower())>0]
+		image_lines[i] = {'text': [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").replace(",","").strip().lower())>0]}
 	company_name = "UNKNOWN"
 	for i in image_lines:
-		for j in range(0,len(i)):
-			if 'inc.' in i[j] or 'llc.' in i[j]:
+		for j in range(0,len(i['text'])):
+			if 'inc.' in i['text'][j] or 'llc.' in i['text'][j]:
 				try:
-					company_name = i[j-1]
+					company_name = i['text'][j-1]
 				except:
 					company_name = 'INC AT START OF LINE'
 	
-	data_dict = {'rank': [],'variable': [], 'year': [], 'value': []}
-	years = ['2020','2019','2018'] 
 	for i in range(0,len(image_lines)):
 		values = []
 		variable = ""
-		for j in image_lines[i]:
-			if(j.isdigit()):
+		for j in image_lines[i]['text']:
+			if(j.replace(b'\xe2\x80\x94'.decode('utf-8'),"").strip().isdigit()):
 				values.append(j)
 			else:
 				variable += " " + str(j)
+		image_lines[i]['variable'] = variable
+		image_lines[i]['values'] = values
 		
-		if(len(values)==3 and variable!=""):
-			for j in range(0,len(years)):
+	data_dict = {'rank': [],'variable': [], 'year': [], 'value': []}
+
+	print(most_frequent([len(i['values']) for i in image_lines]))
+	num_years = most_frequent([len(i['values']) for i in image_lines])
+	print("Num Years for this sheet: --> " + str(num_years))
+	
+	for i in range(0,len(image_lines)):
+		if(len(image_lines[i]['values'])==3 and image_lines[i]['variable']!=""):
+			for j in range(0,num_years):
 				data_dict['rank'].append(str(i))
-				data_dict['variable'].append(variable.strip().lower())
-				data_dict['year'].append(years[j])
-				data_dict['value'].append(values[j])
+				data_dict['variable'].append(image_lines[i]['variable'].strip().lower())
+				data_dict['year'].append(str(2020-j))
+				data_dict['value'].append(image_lines[i]['values'][j])
 
 	print("_____Inputting first half______")
 	[print(len(data_dict[i])) for i in data_dict.keys()]

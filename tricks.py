@@ -41,3 +41,6 @@ def run_SQL(SQL, commit_indic='n', database='C:\\Users\\micha\\Desktop\\Oasys co
 	c.close()
 	conn.close()
 	return data
+
+def most_frequent(List):
+    return max(set(List), key = List.count)
