@@ -18,7 +18,10 @@ def dict_to_sqlite(box_dict, table_name, database):
 	for i in range(0,len(box_dict[list(box_dict.keys())[1]])):
 		instruction_row = []
 		for j in box_dict_list:
-			instruction_row.append(box_dict[j][i])
+			if(box_dict[j][i] is None):
+				instruction_row.append("NULL")
+			else:
+				instruction_row.append(box_dict[j][i])
 		values = ['(']
 		[values.append('''"'''+i+'''",''') for i in instruction_row]
 		values.append(");") 

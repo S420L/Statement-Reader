@@ -2,7 +2,7 @@ import os
 import tempfile
 import time
 from tkinter.filedialog import askopenfilename
-
+from tkinter import Tk
 import cv2
 import pandas as pd
 import pytesseract as Tessa
@@ -44,7 +44,7 @@ def group_by_lines_up(image_lines):
 		for j in range(0,len(image_lines[i])):
 			first_top = image_lines[i][0]['top']
 			if(image_lines[i][j]['top']>first_top+5):
-				if(image_lines[i][j]['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").strip().lower().isdigit()):
+				if(image_lines[i][j]['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").replace("0.","").replace(".","").replace("-","").strip().lower().isdigit()):
 					if(image_lines[i][j]['line_num']<len(image_lines)-1):
 						image_lines[i][j]['line_num'] += 1
 						passed = 1
@@ -76,7 +76,7 @@ def fix_image_lines(image_lines):
 		first_half = [] #anchor the first word to ensure lines are constant
 		second_half = []
 		for j in [k for k in temp_list[i] if len(k)>0]:
-			if(j['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").replace("-","").strip().lower().isdigit()):
+			if(j['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").replace("-","").replace("0.","").strip().lower().isdigit()):
 				second_half.append(j)
 			else:
 				first_half.append(j)
@@ -121,9 +121,9 @@ def get_color(image_data, d):
 	return return_dict
 
 #gui
-#Tk().withdraw()
-#filename = askopenfilename()
-filename = os.path.abspath(os.path.dirname( __file__ ))+'/pics_and_pdfs/dd70d073-44fe-4814-a9f2-adcc2c7fa3f3-2.ppm' #manual for testing
+Tk().withdraw()
+filename = askopenfilename()
+#filename = os.path.abspath(os.path.dirname( __file__ ))+'/pics_and_pdfs/dd70d073-44fe-4814-a9f2-adcc2c7fa3f3-2.ppm' #manual for testing
 
 """image_data = cv2.imread(filename,1) #get color of whatever we're looking at
 img = cv2.imread(filename)
@@ -163,7 +163,7 @@ for image_data in full_image_data:
 	image_lines = [[{key: image_data[key][0] for key in ('text','top','left')}]]
 	image_lines[0][0]['line_num'] = 0
 	tack_on = []
-	line_num = 1
+	line_num = 1 
 	for i in range(0,len(image_data['text'])):
 		if image_data['left'][i]<100:
 			if(image_data['top'][i]>image_lines[len(image_lines)-1][0]['top']+5):
@@ -183,20 +183,6 @@ for image_data in full_image_data:
 	
 	for i in range(0,len(image_lines[-1])):
 		image_lines[-1][i]['line_num'] = max_line_num
-	for i in image_lines:
-		print(i[0]['text'])
-		print(i[0]['line_num'])
-
-	"""line_nums = sorted(list(set(image_data['line_num'])),key=lambda num: num, reverse=False)
-	for i in range(0,len(line_nums)):
-		temp_list = []
-		for j in range(0,len(image_data['line_num'])):
-			if(line_nums[i]==image_data['line_num'][j]):
-				data_dict = {'text': image_data['text'][j]}
-				data_dict['top'] = image_data['top'][j]
-				data_dict['line_num'] = image_data['line_num'][j]
-				temp_list.append(data_dict)
-		image_lines.append(temp_list)"""
 
 	for i in range(0,len(image_lines)):
 		image_lines[i] = [k for k in image_lines[i] if k['text'].strip()!=""]
@@ -204,16 +190,17 @@ for image_data in full_image_data:
 	for i in range(0,len(image_lines)):
 		for j in range(0,len(image_lines[i])):
 			if(image_lines[i][j]['text'].strip()==b'\xe2\x80\x94'.decode('utf-8')):
-				print("ZERO DETECTED")
 				image_lines[i][j]['text'] = str(0)
 				image_lines[i][j]['top'] = float(image_lines[i][j]['top']) - 10
 			elif(image_lines[i][j]['text'].strip()[0]=="(" and image_lines[i][j]['text'][-1].strip()==")"):
-				if(image_lines[i][j]['text'].replace("(","").replace(")","").strip().isdigit()):
-					print("NEGATIVE DETECTED")
+				if(image_lines[i][j]['text'].replace("(","").replace(")","").replace("0.","").replace(".","").strip().isdigit()):
 					image_lines[i][j]['text'] = str("—" + image_lines[i][j]['text'][1:-1])
 
 	original_image_lines = [i for i in image_lines]
 
+	#for i in image_lines:
+	#	print(i[0]['text'])
+	#	print(i[0]['line_num'])
 	#for i in image_lines:
 	#	print(min([j['line_num'] for j in i]))
 	#for i in image_lines:
@@ -226,17 +213,25 @@ for image_data in full_image_data:
 		image_lines, passed = group_by_lines_down(image_lines)
 		image_lines = fix_image_lines(image_lines)
 
+	# sort lines left to right
 	for i in range(0,len(image_lines)):
 		image_lines[i] = sorted(image_lines[i], key = lambda var: var['left'], reverse = False)
 
+	for i in range(0,len(image_lines)):
+		for j in range(1,len(image_lines[i])):
+			if(image_lines[i][j]['text']==image_lines[i][j-1]['text'] and image_lines[i][j]['top']==image_lines[i][j-1]['top']):
+				image_lines[i][j]['text'] = ""
+
 	print("Passed? " + str(passed))
 	print("___________________________________")
-	print([i['text'] for i in image_lines[37]])
+	print([i for i in image_lines[0]])
 	print("___________________________________")
-	print([i['text'] for i in image_lines[38]])
+	print([i['text'] for i in image_lines[1]])
+	print("___________________________________")
+	print([i['text'] for i in image_lines[7]])
 
 	for i in range(0,len(image_lines)):
-		image_lines[i] = {'text': [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").replace(",","").strip().lower())>0]}
+		image_lines[i] = {'text': [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").strip().lower())>0]}
 	company_name = "UNKNOWN"
 	for i in image_lines:
 		for j in range(0,len(i['text'])):
@@ -250,30 +245,37 @@ for image_data in full_image_data:
 		values = []
 		variable = ""
 		for j in image_lines[i]['text']:
-			if(j.replace(b'\xe2\x80\x94'.decode('utf-8'),"").strip().isdigit()):
+			if(j.replace(b'\xe2\x80\x94'.decode('utf-8'),"").replace("0.","").replace(".","").replace("-","").strip().isdigit()):
 				values.append(j)
 			else:
 				variable += " " + str(j)
-		image_lines[i]['variable'] = variable
+		image_lines[i]['variable'] = variable.replace("\"","")
 		image_lines[i]['values'] = values
 		
 	data_dict = {'rank': [],'variable': [], 'year': [], 'value': []}
-
-	print(most_frequent([len(i['values']) for i in image_lines]))
 	num_years = most_frequent([len(i['values']) for i in image_lines])
-	print("Num Years for this sheet: --> " + str(num_years))
-	
+
 	for i in range(0,len(image_lines)):
-		if(len(image_lines[i]['values'])==3 and image_lines[i]['variable']!=""):
+		if(len(image_lines[i]['values'])==num_years and image_lines[i]['variable']!=""):
 			for j in range(0,num_years):
 				data_dict['rank'].append(str(i))
 				data_dict['variable'].append(image_lines[i]['variable'].strip().lower())
 				data_dict['year'].append(str(2020-j))
 				data_dict['value'].append(image_lines[i]['values'][j])
+		elif(len(image_lines[i]['values'])==0 and image_lines[i]['variable']!=""):
+			data_dict['rank'].append(str(i))
+			data_dict['variable'].append(image_lines[i]['variable'].strip().lower())
+			data_dict['year'].append("HEADING")
+			data_dict['value'].append("HEADING")
 
 	print("_____Inputting first half______")
 	[print(len(data_dict[i])) for i in data_dict.keys()]
 	dict_to_sqlite(data_dict, "financials_temp_1", str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
+	SQL = """
+	insert into financials
+	select * from financials_temp_1;
+	"""
+	run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
 
 	"""print([i for i in image_lines[7]])
 	image_lines = original_image_lines
