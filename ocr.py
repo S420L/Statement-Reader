@@ -57,14 +57,31 @@ def group_by_lines_down(image_lines):
 	for i in range(0,len(image_lines)):
 		for j in range(0,len(image_lines[i])):
 			first_top = image_lines[i][0]['top']
-			if((image_lines[i][j]['top']+5<first_top) and image_lines[i][j]['line_num']>1):
-				if(image_lines[i][j]['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").strip().lower().isdigit()):
+			if((image_lines[i][j]['top']+5<first_top)):
 					if(image_lines[i][j]['line_num']>0):
 						image_lines[i][j]['line_num'] -= 1
 						passed = 1
 					else:
 						image_lines[i][j]['text'] = "" #terminate journey of this number, its probably from the top of the sheet
 	return image_lines, passed
+
+def fix_image_lines(image_lines):
+	max_line_num = max([i['line_num'] for i in image_lines[-1]])
+	temp_list = [[] for i in range(0,max_line_num+1)]
+	for i in range(0,len(image_lines)):
+		for j in range(0,len(image_lines[i])):
+			temp_list[image_lines[i][j]['line_num']].append(image_lines[i][j])
+	return_list = []
+	for i in range(0,len(temp_list)):
+		first_half = [] #anchor the first word to ensure lines are constant
+		second_half = []
+		for j in [k for k in temp_list[i] if len(k)>0]:
+			if(j['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").strip().lower().isdigit()):
+				second_half.append(j)
+			else:
+				first_half.append(j)
+		return_list.append(first_half+second_half)
+	return return_list
 
 def get_color(image_data, d):
 	return_dict = {'level':[],'left':[],'top':[],'width':[],'height':[],'text':[],'R':[], 'G':[], 'B':[],'count':[],'percent':[]} 
@@ -118,24 +135,6 @@ print(box_dict.keys())
 
 dict_to_sqlite(box_dict,'image_table', 'image_data.db')"""
 
-def fix_image_lines(image_lines):
-	max_line_num = max([i['line_num'] for i in image_lines[-1]])
-	temp_list = [[] for i in range(0,max_line_num+1)]
-	for i in range(0,len(image_lines)):
-		for j in range(0,len(image_lines[i])):
-			temp_list[image_lines[i][j]['line_num']].append(image_lines[i][j])
-	return_list = []
-	for i in temp_list:
-		first_half = []
-		second_half = []
-		for j in [k for k in i if len(k)>0]:
-			if(j['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").strip().lower().isdigit()):
-				second_half.append(j)
-			else:
-				first_half.append(j)
-		return_list.append(first_half+second_half)
-	return return_list
-
 #if it's a PDF, convert to image first
 start_time = time.time()
 try:
@@ -148,14 +147,47 @@ except:
 full_image_data = []
 for image in images:
 	image_text, image_data = image_to_text(image)
-	print(image_text)
 	full_image_data.append(image_data) #only use image data (includes text)
 
 SQL = """delete from financials;"""
 run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
 for image_data in full_image_data:
-	image_lines = []
-	line_nums = sorted(list(set(image_data['line_num'])),key=lambda num: num, reverse=False)
+	temp_data = {'text': [], 'top': [], 'left': [], 'line_num': []}
+	for i in range(0,len(image_data['text'])):
+		if(image_data['text'][i]!=""):
+			temp_data['text'].append(image_data['text'][i])
+			temp_data['top'].append(image_data['top'][i])
+			temp_data['left'].append(image_data['left'][i])
+			temp_data['line_num'].append(image_data['line_num'][i])
+	image_data = temp_data
+	image_lines = [[{key: image_data[key][0] for key in ('text','top','left')}]]
+	image_lines[0][0]['line_num'] = 0
+	tack_on = []
+	line_num = 1
+	for i in range(0,len(image_data['text'])):
+		if image_data['left'][i]<100:
+			if(image_data['top'][i]>image_lines[len(image_lines)-1][0]['top']+5):
+				line = {key: image_data[key][i] for key in ('text','top','left','line_num')}
+				line['line_num'] = line_num
+				line_num+=1
+				image_lines.append([line])
+			else:
+				tack_on.append({key: image_data[key][i] for key in ('text','top','left','line_num')})
+		else:
+			tack_on.append({key: image_data[key][i] for key in ('text','top','left','line_num')})
+
+	tack_on = sorted(tack_on, key = lambda num: num['top'], reverse=True)
+	for i in tack_on:
+		image_lines[-1].append(i)
+	max_line_num = len(image_lines)-1
+	
+	for i in range(0,len(image_lines[-1])):
+		image_lines[-1][i]['line_num'] = max_line_num
+	for i in image_lines:
+		print(i[0]['text'])
+		print(i[0]['line_num'])
+
+	"""line_nums = sorted(list(set(image_data['line_num'])),key=lambda num: num, reverse=False)
 	for i in range(0,len(line_nums)):
 		temp_list = []
 		for j in range(0,len(image_data['line_num'])):
@@ -164,7 +196,7 @@ for image_data in full_image_data:
 				data_dict['top'] = image_data['top'][j]
 				data_dict['line_num'] = image_data['line_num'][j]
 				temp_list.append(data_dict)
-		image_lines.append(temp_list)
+		image_lines.append(temp_list)"""
 
 	for i in range(0,len(image_lines)):
 		image_lines[i] = [k for k in image_lines[i] if k['text'].strip()!=""]
@@ -176,30 +208,33 @@ for image_data in full_image_data:
 				image_lines[i][j]['text'] = str(0)
 				image_lines[i][j]['top'] = float(image_lines[i][j]['top']) - 10
 			elif(image_lines[i][j]['text'].strip()[0]=="(" and image_lines[i][j]['text'][-1].strip()==")"):
-				print("NEGATIVE DETECTED")
-				image_lines[i][j]['text'] = str("—" + image_lines[i][j]['text'][1:-1])
+				if(image_lines[i][j]['text'].replace("(","").replace(")","").strip().isdigit()):
+					print("NEGATIVE DETECTED")
+					image_lines[i][j]['text'] = str("—" + image_lines[i][j]['text'][1:-1])
 
 	original_image_lines = [i for i in image_lines]
 
-	print([i for i in image_lines[2]])
-	#print([i for i in image_lines[17]])
-	#print([i for i in image_lines[18]])
-	#print([i for i in image_lines[19]])
-	#print([i for i in image_lines[20]])
-	#print([i for i in image_lines[21]])
-	#print([i for i in image_lines[22]])
-
-	for i in range(0,69):	
-		image_lines, passed = group_by_lines_up(image_lines)
-		image_lines = fix_image_lines(image_lines)
-
-	print("Len Image Lines: " + str(len(image_lines)))
-
+	#for i in image_lines:
+	#	print(min([j['line_num'] for j in i]))
+	#for i in image_lines:
+	#	print(len(i))
 	#for i in image_lines:
 	#	if(len(i)>0):
 	#		print(i[0]['text'])
 
-	print("Passed: " + str(passed))
+	for i in range(0,100):	
+		image_lines, passed = group_by_lines_down(image_lines)
+		image_lines = fix_image_lines(image_lines)
+
+	for i in range(0,len(image_lines)):
+		image_lines[i] = sorted(image_lines[i], key = lambda var: var['left'], reverse = False)
+
+	print("Passed? " + str(passed))
+	print("___________________________________")
+	print([i['text'] for i in image_lines[-2]])
+	print("___________________________________")
+	print([i['text'] for i in image_lines[-1]])
+
 	for i in range(0,len(image_lines)):
 		image_lines[i] = [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").replace(",","").strip().lower())>0]
 	company_name = "UNKNOWN"
@@ -233,7 +268,7 @@ for image_data in full_image_data:
 	[print(len(data_dict[i])) for i in data_dict.keys()]
 	dict_to_sqlite(data_dict, "financials_temp_1", str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
 
-	print([i for i in image_lines[7]])
+	"""print([i for i in image_lines[7]])
 	image_lines = original_image_lines
 	for i in range(0,69):	
 		image_lines, passed = group_by_lines_down(image_lines)
@@ -281,9 +316,9 @@ for image_data in full_image_data:
 
 	print("_____Inputting second half______")
 	[print(len(data_dict[i])) for i in data_dict.keys()]
-	dict_to_sqlite(data_dict, "financials_temp_2", str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
+	dict_to_sqlite(data_dict, "financials_temp_2", str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))"""
 
-	SQL = """
+	'''SQL = """
 	insert into financials
 	select *
 	from (
@@ -292,6 +327,6 @@ for image_data in full_image_data:
 	select * from financials_temp_2
 	);
 	"""
-	run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
+	run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))'''
 
 print("finished running in: " + str(time.time()-start_time) + " seconds")
