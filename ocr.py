@@ -10,7 +10,7 @@ from pdf2image import convert_from_path
 from PIL import Image
 from pytesseract import Output
 
-from tricks import dict_to_sqlite, run_SQL, most_frequent
+from tricks import dict_to_sqlite, run_SQL, most_frequent, send_to_excel, list_to_dict
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
@@ -277,65 +277,18 @@ for image_data in full_image_data:
 	"""
 	run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
 
-	"""print([i for i in image_lines[7]])
-	image_lines = original_image_lines
-	for i in range(0,69):	
-		image_lines, passed = group_by_lines_down(image_lines)
-		image_lines = fix_image_lines(image_lines)
-
-	print([i for i in image_lines[7]])
-
-	#print(first_image_lines)
-	#print("_______________________")
-	#print(second_image_lines)
-
-	#image_lines = first_image_lines + [i for i in second_image_lines if i[0]['text'] not in [i[0]['text'] for i in first_image_lines]]
-	print("Len Image Lines: " + str(len(image_lines)))
-
-	print("Passed: " + str(passed))
-	for i in range(0,len(image_lines)):
-		image_lines[i] = [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").replace(",","").strip().lower())>0]
-	company_name = "UNKNOWN"
-	for i in image_lines:
-		for j in range(0,len(i)):
-			if 'inc.' in i[j] or 'llc.' in i[j]:
-				try:
-					company_name = i[j-1]
-				except:
-					company_name = 'INC AT START OF LINE'
-	
-	data_dict = {'rank': [],'variable': [], 'year': [], 'value': []}
-	years = ['2020','2019','2018'] 
-	print(len(image_lines))
-	for i in range(0,len(image_lines)):
-		values = []
-		variable = ""
-		for j in image_lines[i]:
-			if(j.isdigit()):
-				values.append(j)
-			else:
-				variable += " " + str(j)
-		
-		if(len(values)==3 and variable!=""):
-			for j in range(0,len(years)):
-				data_dict['rank'].append(str(i))
-				data_dict['variable'].append(variable.strip().lower())
-				data_dict['year'].append(years[j])
-				data_dict['value'].append(values[j])
-
-	print("_____Inputting second half______")
-	[print(len(data_dict[i])) for i in data_dict.keys()]
-	dict_to_sqlite(data_dict, "financials_temp_2", str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))"""
-
-	'''SQL = """
-	insert into financials
-	select *
-	from (
-	select * from financials_temp_1
-	union
-	select * from financials_temp_2
-	);
+SQL = """
+	select distinct variable, sum(case
+	when year=2020 then value end) as this_year, sum(case 
+	when year=2019 then value end) as last_year
+	from financials
+	group by variable
+	order by cast(rank as 'decimal');
 	"""
-	run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))'''
+data = run_SQL(SQL, database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
+data = [{'variable': i[0], '2020': i[1], '2019': i[2]} for i in data]
+data = list_to_dict(data)
 
+send_to_excel(os.path.dirname(__file__),data,"Financial Statement Output",clear_indic='n')
 print("finished running in: " + str(time.time()-start_time) + " seconds")
+
