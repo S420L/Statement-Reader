@@ -1,58 +1,50 @@
 import os
-import tempfile
 import time
-from tkinter.filedialog import askopenfilename
-from tkinter import Tk
-import cv2
+import tempfile
 import pandas as pd
-import pytesseract as Tessa
-from pdf2image import convert_from_path
-from PIL import Image
+from tkinter import Tk
 from pytesseract import Output
-
+from pdf2image import convert_from_path
+from tkinter.filedialog import askopenfilename
+from pytesseract import image_to_data as Tessa_image_to_data
+from cv2 import imread, imwrite, cvtColor, COLOR_BGR2GRAY, rectangle, imshow, waitKey
 from tricks import dict_to_sqlite, run_SQL, most_frequent, send_to_excel, list_to_dict
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
+def show_rectangles(image_data):
+	'''function for showing borders around words (visualize the data from image_to_data)
+	'''
+	for i in range(0,len(image_data['line_num'])):
+		(x, y, w, h) = (image_data['left'][i], image_data['top'][i], image_data['width'][i], image_data['height'][i])
+	rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+	imshow('Results',image)
+	waitKey(0)
+	return
+
 #get text from image
 def image_to_text(filename):
-	image = cv2.imread(filename)
-	gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-	filename = str(os.path.abspath(os.path.dirname(__file__))+"/pics_and_pdfs/{}.png").format(os.getpid())
-	cv2.imwrite(filename, gray)
-	image_text = Tessa.image_to_string(Image.open(filename))
-	image_data = Tessa.image_to_data(filename, output_type = Output.DICT)
+	image = imread(filename)
+	gray = cvtColor(image, COLOR_BGR2GRAY)
+	filename = str(os.path.abspath(os.path.dirname(__file__))+"{}.png").format(os.getpid())
+	imwrite(filename, gray)
+	image_data = Tessa_image_to_data(filename, output_type = Output.DICT)
 	os.remove(filename)
-	#for i in range(0,len(image_data['line_num'])):
-	#	(x, y, w, h) = (image_data['left'][i], image_data['top'][i], image_data['width'][i], image_data['height'][i])
-	#	cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
-	#cv2.imshow('Results',image)
-	#cv2.waitKey(0)
-	return image_text, image_data
+	return image_data
 
 #get image from PDF
 def pdf_to_image(filename):
 	with tempfile.TemporaryDirectory() as path:
-		images_from_path = convert_from_path(filename, output_folder=os.path.abspath(os.path.dirname(__file__))+"/pics_and_pdfs")
+		images_from_path = convert_from_path(filename, output_folder=os.path.abspath(os.path.dirname(__file__)))
 		print('running for image: ' + str(images_from_path))
 		filenames = [i.filename for i in images_from_path]
 		return filenames
 
-def group_by_lines_up(image_lines):
-	passed = 0
-	for i in range(0,len(image_lines)):
-		for j in range(0,len(image_lines[i])):
-			first_top = image_lines[i][0]['top']
-			if(image_lines[i][j]['top']>first_top+5):
-				if(image_lines[i][j]['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").replace("0.","").replace(".","").replace("-","").strip().lower().isdigit()):
-					if(image_lines[i][j]['line_num']<len(image_lines)-1):
-						image_lines[i][j]['line_num'] += 1
-						passed = 1
-					else:
-						image_lines[i][j]['text'] = "" #terminate journey of this number, its probably from the bottom of the sheet
-	return image_lines, passed
-
-def group_by_lines_down(image_lines):
+def group_by_lines(image_lines):
+	'''
+	 --  do the iterative migration top to bottom, if an element is too close to the top of the page to be in its index then move down by one
+	 -- "passed" indicates weather or not the algorithm has yet converged
+	'''
 	passed = 0
 	for i in range(0,len(image_lines)):
 		for j in range(0,len(image_lines[i])):
@@ -66,6 +58,8 @@ def group_by_lines_down(image_lines):
 	return image_lines, passed
 
 def fix_image_lines(image_lines):
+	'''part 2 of algorithm, fix reweighted list items so they're grouped right
+	'''
 	max_line_num = max([i['line_num'] for i in image_lines[-1]])
 	temp_list = [[] for i in range(0,max_line_num+1)]
 	for i in range(0,len(image_lines)):
@@ -84,6 +78,8 @@ def fix_image_lines(image_lines):
 	return return_list
 
 def get_color(image_data, d):
+	'''get most likely color of text (sampled through the midline of the rectangle surrounding the word)
+	'''
 	return_dict = {'level':[],'left':[],'top':[],'width':[],'height':[],'text':[],'R':[], 'G':[], 'B':[],'count':[],'percent':[]} 
 	for w in range(0,len(d['left']),1):
 		pixel_list = []
@@ -123,7 +119,7 @@ def get_color(image_data, d):
 #gui
 Tk().withdraw()
 filename = askopenfilename()
-#filename = os.path.abspath(os.path.dirname( __file__ ))+'/pics_and_pdfs/dd70d073-44fe-4814-a9f2-adcc2c7fa3f3-2.ppm' #manual for testing
+#filename = os.path.abspath(os.path.dirname( __file__ ))+'dd70d073-44fe-4814-a9f2-adcc2c7fa3f3-2.ppm' #manual for testing
 
 """image_data = cv2.imread(filename,1) #get color of whatever we're looking at
 img = cv2.imread(filename)
@@ -146,7 +142,7 @@ except:
 
 full_image_data = []
 for image in images:
-	image_text, image_data = image_to_text(image)
+	image_data = image_to_text(image)
 	full_image_data.append(image_data) #only use image data (includes text)
 
 SQL = """delete from financials;"""
@@ -210,7 +206,7 @@ for image_data in full_image_data:
 	#		print(i[0]['text'])
 
 	for i in range(0,100):	
-		image_lines, passed = group_by_lines_down(image_lines)
+		image_lines, passed = group_by_lines(image_lines)
 		image_lines = fix_image_lines(image_lines)
 
 	# sort lines left to right
@@ -278,15 +274,18 @@ for image_data in full_image_data:
 	run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
 
 SQL = """
-	select distinct variable, sum(case
+	select * from (
+	select distinct rank, variable, sum(case
 	when year=2020 then value end) as this_year, sum(case 
-	when year=2019 then value end) as last_year
+	when year=2019 then value end) as last_year, sum(case
+	when year=2019 then value end) as year_before, count(*) as total
 	from financials
-	group by variable
-	order by cast(rank as 'decimal');
+	group by rank, variable
+	order by cast(rank as 'decimal'))
+	where total<=3;
 	"""
 data = run_SQL(SQL, database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
-data = [{'variable': i[0], '2020': i[1], '2019': i[2]} for i in data]
+data = [{'variable': i[1], '2020': i[2], '2019': i[3], '2018': i[4]} for i in data]
 data = list_to_dict(data)
 
 send_to_excel(os.path.dirname(__file__),data,"Financial Statement Output",clear_indic='n')
