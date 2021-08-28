@@ -3,21 +3,21 @@ import time
 import tempfile
 import pandas as pd
 from tkinter import Tk
-from pytesseract import Output
+from pytesseract import Output, image_to_data
 from pdf2image import convert_from_path
 from tkinter.filedialog import askopenfilename
 from pytesseract import image_to_data as Tessa_image_to_data
-from cv2 import imread, imwrite, cvtColor, COLOR_BGR2GRAY, rectangle, imshow, waitKey
+from cv2 import COLOR_BGR2GRAY, imread, imwrite, cvtColor, rectangle, imshow, waitKey
 from tricks import dict_to_sqlite, run_SQL, most_frequent, send_to_excel, list_to_dict
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
-def show_rectangles(image_data):
+def show_rectangles(image, image_data):
 	'''function for showing borders around words (visualize the data from image_to_data)
 	'''
 	for i in range(0,len(image_data['line_num'])):
 		(x, y, w, h) = (image_data['left'][i], image_data['top'][i], image_data['width'][i], image_data['height'][i])
-	rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+		rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
 	imshow('Results',image)
 	waitKey(0)
 	return
@@ -29,6 +29,7 @@ def image_to_text(filename):
 	filename = str(os.path.abspath(os.path.dirname(__file__))+"{}.png").format(os.getpid())
 	imwrite(filename, gray)
 	image_data = Tessa_image_to_data(filename, output_type = Output.DICT)
+	#show_rectangles(image, image_data)
 	os.remove(filename)
 	return image_data
 
@@ -56,6 +57,22 @@ def group_by_lines(image_lines):
 					else:
 						image_lines[i][j]['text'] = "" #terminate journey of this number, its probably from the top of the sheet
 	return image_lines, passed
+
+def group_by_columns():
+	SQL = """drop table if exists right_side;"""
+	run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
+
+	SQL = """create table right_side as
+	select cast(left as 'decimal') as left, text, cast(top as 'decimal') as top
+	from image_table
+	where text not in ('$',' ') and abs(text) <> 0.0
+	and cast(left as 'decimal')>(select max(cast(left as 'decimal'))/2 from image_table)
+	order by cast(top as 'decimal') asc, cast(left as 'decimal') asc;"""
+	run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
+	
+	SQL = """select * from right_side order by left;"""
+	data = run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
+	print(data)
 
 def fix_image_lines(image_lines):
 	'''part 2 of algorithm, fix reweighted list items so they're grouped right
@@ -116,20 +133,21 @@ def get_color(image_data, d):
 			return_dict['percent'].append(str(final_row['percent'].values[0]))
 	return return_dict
 
+def save_image_data(filename):
+	image_data = imread(filename,1) #get color of whatever we're looking at
+	img = imread(filename)
+	d = image_to_data(img, output_type = Output.DICT)
+	print('LEN D: ' + str(len(d['left']))) #how long is the dict we're putting into function?
+	box_dict = get_color(image_data,d) #get RGB info on characters
+	print('LEN box_dict:: '+ str(len(box_dict['R']))) #how long is the dict we're getting out?
+	print(box_dict.keys())
+	dict_to_sqlite(box_dict,'image_table', 'image_data.db')
+	return
+
 #gui
 Tk().withdraw()
 filename = askopenfilename()
 #filename = os.path.abspath(os.path.dirname( __file__ ))+'dd70d073-44fe-4814-a9f2-adcc2c7fa3f3-2.ppm' #manual for testing
-
-"""image_data = cv2.imread(filename,1) #get color of whatever we're looking at
-img = cv2.imread(filename)
-d = Tessa.image_to_data(img, output_type = Output.DICT)
-print('LEN D: ' + str(len(d['left']))) #how long is the dict we're putting into function?
-box_dict = get_color(image_data,d) #get RGB info on characters
-print('LEN box_dict:: '+ str(len(box_dict['R']))) #how long is the dict we're getting out?
-print(box_dict.keys())
-
-dict_to_sqlite(box_dict,'image_table', 'image_data.db')"""
 
 #if it's a PDF, convert to image first
 start_time = time.time()
@@ -144,6 +162,7 @@ full_image_data = []
 for image in images:
 	image_data = image_to_text(image)
 	full_image_data.append(image_data) #only use image data (includes text)
+	os.remove(image)
 
 SQL = """delete from financials;"""
 run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
@@ -289,5 +308,6 @@ data = [{'variable': i[1], '2020': i[2], '2019': i[3], '2018': i[4]} for i in da
 data = list_to_dict(data)
 
 send_to_excel(os.path.dirname(__file__),data,"Financial Statement Output",clear_indic='n')
+
 print("finished running in: " + str(time.time()-start_time) + " seconds")
 
