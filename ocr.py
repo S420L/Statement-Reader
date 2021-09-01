@@ -1,20 +1,27 @@
 import os
-import time
 import tempfile
-import pandas as pd
+import time
 from tkinter import Tk
-from pytesseract import Output, image_to_data
-from pdf2image import convert_from_path
 from tkinter.filedialog import askopenfilename
+
+import pandas as pd
+from cv2 import (ADAPTIVE_THRESH_MEAN_C, COLOR_BGR2GRAY, THRESH_BINARY,
+                 adaptiveThreshold, cvtColor, imread, imshow, imwrite, line,
+                 rectangle, waitKey, ximgproc)
+from pdf2image import convert_from_path
+from pytesseract import Output
 from pytesseract import image_to_data as Tessa_image_to_data
-from cv2 import COLOR_BGR2GRAY, imread, imwrite, cvtColor, rectangle, imshow, waitKey
-from tricks import dict_to_sqlite, run_SQL, most_frequent, send_to_excel, list_to_dict
+from pytesseract import image_to_string as Tessa_image_to_string
+
+from tricks import (dict_to_sqlite, list_to_dict, most_frequent, run_SQL,
+                    send_to_excel)
 
 pd.options.mode.chained_assignment = None  # default='warn'
 
-def show_rectangles(image, image_data):
+def show_rectangles(image_data, filename):
 	'''function for showing borders around words (visualize the data from image_to_data)
 	'''
+	image = imread(filename)
 	for i in range(0,len(image_data['line_num'])):
 		(x, y, w, h) = (image_data['left'][i], image_data['top'][i], image_data['width'][i], image_data['height'][i])
 		rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
@@ -30,7 +37,7 @@ def image_to_text(filename):
 	imwrite(filename, gray)
 	image_data = Tessa_image_to_data(filename, output_type = Output.DICT)
 	#show_rectangles(image, image_data)
-	os.remove(filename)
+	#os.remove(filename)
 	return image_data
 
 #get image from PDF
@@ -71,7 +78,7 @@ def group_by_columns():
 	run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
 	
 	SQL = """select * from right_side order by left;"""
-	data = run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
+	data = run_SQL(SQL)
 	print(data)
 
 def fix_image_lines(image_lines):
@@ -94,60 +101,47 @@ def fix_image_lines(image_lines):
 		return_list.append(first_half+second_half)
 	return return_list
 
-def get_color(image_data, d):
-	'''get most likely color of text (sampled through the midline of the rectangle surrounding the word)
-	'''
-	return_dict = {'level':[],'left':[],'top':[],'width':[],'height':[],'text':[],'R':[], 'G':[], 'B':[],'count':[],'percent':[]} 
-	for w in range(0,len(d['left']),1):
-		pixel_list = []
-		for i in range(d['left'][w],d['left'][w]+d['width'][w],1):
-			pixel_list.append(image_data[d['top'][w]+(int(d['height'][w]/2))][i]) #sample pixels in a line through the middle of each box
-		pixel_list = [i for i in pixel_list if int(i[0]) + int(i[1]) + int(i[2]) < 742] #disregard anything that's basically white
-		pixel_list = [[int(i[0]),int(i[1]),int(i[2])] for i in pixel_list]
-		if(len(pixel_list)>0 and d['text'][w]!=''): #only run for boxes with words in them
-			df = pd.DataFrame.from_records(pixel_list) #turn dict into dataframe
-			df.columns = ['B','G','R'] #this library reverses the rgb order
-			df = df.groupby(['B','G','R']).size().reset_index().rename(columns={0:'count'}) #on the equator of the box, we want to see how many of each (non-white) color show up 
-			df['percent'] = df['count']/df['count'].sum() #get % of pixels on the center line that are that color
-			final_row = df[df['count']==df['count'].max()]
-			#print(final_row)
-			#print("text ^^: " + str(d['text'][w]))
-			if(len(final_row['count'])>1): #force it to be distinct
-				final_row['R'] = int(final_row['R'].sum()/len(final_row)) #avg the colors
-				final_row['G'] = int(final_row['G'].sum()/len(final_row)) 
-				final_row['B'] = int(final_row['B'].sum()/len(final_row))
-				final_row['count'] = int(final_row['count'].max()) #take the max count
-				final_row['percent'] = float(final_row['percent'].max())
-				final_row = final_row.drop_duplicates()
-			final_row = final_row.to_dict('series')
-			return_dict['level'].append(str(d['level'][w]))  #add variables that didn't change
-			return_dict['left'].append(str(d['left'][w]))
-			return_dict['top'].append(str(d['top'][w]))
-			return_dict['width'].append(str(d['width'][w]))
-			return_dict['height'].append(str(d['height'][w]))
-			return_dict['text'].append(str(d['text'][w]))
-			return_dict['R'].append(str(final_row['R'].values[0]))  #add variables that were generated in this function
-			return_dict['G'].append(str(final_row['G'].values[0]))
-			return_dict['B'].append(str(final_row['B'].values[0]))
-			return_dict['count'].append(str(final_row['count'].values[0]))
-			return_dict['percent'].append(str(final_row['percent'].values[0]))
-	return return_dict
-
-def save_image_data(filename):
-	image_data = imread(filename,1) #get color of whatever we're looking at
-	img = imread(filename)
-	d = image_to_data(img, output_type = Output.DICT)
-	print('LEN D: ' + str(len(d['left']))) #how long is the dict we're putting into function?
-	box_dict = get_color(image_data,d) #get RGB info on characters
-	print('LEN box_dict:: '+ str(len(box_dict['R']))) #how long is the dict we're getting out?
-	print(box_dict.keys())
-	dict_to_sqlite(box_dict,'image_table', 'image_data.db')
+def save_image_data(image_data):
+	columns = ['left','top','width','height','text']
+	data_dict = {i:[] for i in columns}
+	for i in range(0,len(image_data['text'])):
+		if(image_data['text'][i] not in ('',' ',None,'$','§')):
+			image_data['text'][i] = image_data['text'][i].replace("A4","4")
+			for key in columns:
+				data_dict[key].append(str(image_data[key][i]))
+	print('Number of rows going in... '+ str(len(data_dict['text']))) #how long is the dict we're getting out?
+	dict_to_sqlite(data_dict,'image_table', 'image_data.db')
 	return
+
+def remove_lines(filename):
+	""" get rid of horizontal lines in the financial statement (interfears with optical character recognition)
+	"""
+	img = imread(filename)
+	gry = cvtColor(img, COLOR_BGR2GRAY)
+	lns = ximgproc.createFastLineDetector(length_threshold=20).detect(gry)
+	if lns is not None:
+		for ln in lns:
+			(x_start, y_start, x_end, y_end) = [int(i) for i in ln[0]]
+			if(abs(abs(float(y_start))-abs(float(y_end)))<5):
+				#print("x_start: " + str(x_start) + "  " + "x_end: " + str(x_end) + "  y_start: " + str(y_start) + "  " + "y_end: " + str(y_end))
+				line(gry, (x_start-(x_end-x_start), y_start), (x_end, y_end), (255, 255, 255), thickness=4)
+	thr = adaptiveThreshold(gry, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 21, 23)
+	filename = str(os.path.abspath(os.path.dirname(__file__))+"{}.png").format(os.getpid())
+	imwrite(filename, gry)
+	image_data = Tessa_image_to_data(thr, output_type = Output.DICT)
+	return image_data, filename
 
 #gui
 Tk().withdraw()
-filename = askopenfilename()
-#filename = os.path.abspath(os.path.dirname( __file__ ))+'dd70d073-44fe-4814-a9f2-adcc2c7fa3f3-2.ppm' #manual for testing
+#filename = askopenfilename()
+filename = os.path.abspath(os.path.dirname( __file__ ))+'\\a0997987-7016-4ac6-b7e7-a77b95b5e499-2.ppm' #manual for testing
+image_data, filename = remove_lines(filename)
+#show_rectangles(image_data, filename)
+save_image_data(image_data)
+#group_by_columns()
+import sys
+
+sys.exit(0)
 
 #if it's a PDF, convert to image first
 start_time = time.time()
@@ -162,7 +156,7 @@ full_image_data = []
 for image in images:
 	image_data = image_to_text(image)
 	full_image_data.append(image_data) #only use image data (includes text)
-	os.remove(image)
+	#os.remove(image)
 
 SQL = """delete from financials;"""
 run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
@@ -304,7 +298,7 @@ SQL = """
 	where total<=3;
 	"""
 data = run_SQL(SQL, database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
-data = [{'variable': i[1], '2020': i[2], '2019': i[3], '2018': i[4]} for i in data]
+data = [{'variable': i['variable'], '2020': i['this_year'], '2019': i['last_year'], '2018': i['year_before']} for i in data]
 data = list_to_dict(data)
 
 send_to_excel(os.path.dirname(__file__),data,"Financial Statement Output",clear_indic='n')

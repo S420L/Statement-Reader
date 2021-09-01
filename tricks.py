@@ -36,8 +36,9 @@ def dict_to_sqlite(box_dict, table_name, database):
 		conn.commit()
 	conn.close()
 
-def run_SQL(SQL, commit_indic='n', database='C:\\Users\\micha\\Desktop\\Oasys code\\automation\\recipe_scraper\\OCR\\image_data.db'):
+def run_SQL(SQL, commit_indic='n', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db")):
 	conn = sqlite3.connect(database)
+	conn.row_factory = sqlite3.Row
 	c = conn.cursor()
 	c.execute(SQL)
 	data = c.fetchall()
@@ -46,6 +47,7 @@ def run_SQL(SQL, commit_indic='n', database='C:\\Users\\micha\\Desktop\\Oasys co
 		return
 	c.close()
 	conn.close()
+	data = [dict(i) for i in data]
 	return data
 
 def most_frequent(List):
