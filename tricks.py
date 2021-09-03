@@ -3,7 +3,7 @@ import string
 import os
 from openpyxl import load_workbook
 
-def dict_to_sqlite(box_dict, table_name, database):
+def dict_to_sqlite(box_dict, table_name, database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db")):
 	conn = sqlite3.connect(database)
 	c = conn.cursor()
 	c.execute("drop table if exists " + table_name + ";")
@@ -26,7 +26,7 @@ def dict_to_sqlite(box_dict, table_name, database):
 			else:
 				instruction_row.append(box_dict[j][i])
 		values = ['(']
-		[values.append('''"'''+i+'''",''') for i in instruction_row]
+		[values.append('''"'''+str(i)+'''",''') for i in instruction_row]
 		values.append(");") 
 		values = "".join(values).replace(",)", ")")  # placeholder for values
 		SQL = "INSERT INTO " + str(table_name) + "(" + str(table_columns) + ") values " + values
