@@ -60,86 +60,90 @@ def left_rule(data):
 	-- another way of detecting if there's too much empty space above or below a word
 	'''
 	left_thresh = 69
-	new_data = []
 	passed = 0
 	for i in range(0,len(data)):
 		if(i==0):
 			if(int(data[i+1]['left'])>int(data[i]['left'])+left_thresh):
 				print("Removing...")
 				print(data[i])
+				print("_________________________________")
 				passed = 1
-				continue
+				del data[i]
+				return data, passed
 			else:
-				new_data.append(data[i])
+				continue
 		elif(i==len(data)-1):
 			if(int(data[i]['left'])>int(data[i-1]['left'])+left_thresh):
 				print("Removing...")
 				print(data[i])
+				print("_________________________________")
 				passed = 1
-				continue
+				del data[i]
+				return data, passed
 			else:
-				new_data.append(data[i])
+				continue
 		elif(int(data[i]['left'])>int(data[i-1]['left'])+left_thresh and int(data[i+1]['left'])>int(data[i]['left'])+left_thresh):
 			print("Removing...")
 			print(data[i])
+			print("_________________________________")
 			passed = 1
-			continue
+			del data[i]
+			return data, passed
 		else:
-			new_data.append(data[i])
+			continue
 
-	SQL = """delete from right_side_1;"""
-	run_SQL(SQL, commit_indic='y')
-	data_dict = list_to_dict(new_data)
-	dict_to_sqlite(data_dict, "right_side_1")
-
-	return new_data, passed
+	return data, passed
 
 def top_rule(data):
 	'''
 	-- force table like structure onto data on right side of page
 	-- things need to be in groups of twos, threes, etc...
 	'''
-	new_data = []
 	top_thresh = 2
 	passed = 0
-	for i in range(0,len(data)):
+	for i in range(0,len(data),3):
 		top = int(data[i]['top'])
 		if(i<len(data)-4):
+			if((top + top_thresh)>int(data[i+1]['top']) and (top + top_thresh)>int(data[i+2]['top'])):
+				pass
+			else:
+				print("Removing...(group too small)")
+				print(data[i])
+				print(str(data[i]['top']))
+				print(str(data[i+1]['top']))
+				print(str(data[i+2]['top']))
+				print("_________________________________")
+				passed = 1
+				del data[i]
+				return sorted(data, key = lambda num: int(num['top']), reverse=False), passed
 			if(top<int(data[i+1]['top']) + top_thresh and top<int(data[i+2]['top']) + top_thresh and top+top_thresh<int(data[i+3]['top'])):
-				new_data.append(data[i])
-				new_data.append(data[i+1])
-				new_data.append(data[i+2])
+				continue
 			else:
 				print("Removing... (group too large)")
 				print(data[i])
 				print("_________________________________")
 				passed = 1
-				continue
+				del data[i]
+				return sorted(data, key = lambda num: int(num['top']), reverse=False), passed
 		elif(i<len(data)-3):
-			if(top<int(data[i+1]['top']) + top_thresh and top<int(data[i+2]['top']) + top_thresh):
-				new_data.append(data[i])
-				new_data.append(data[i+1])
-				new_data.append(data[i+2])
+			if((top + top_thresh)>int(data[i+1]['top']) and (top + top_thresh)>int(data[i+2]['top'])):
+				pass
 			else:
 				print("Removing...(group too small)")
 				print(data[i])
+				print("_________________________________")
 				passed = 1
-				continue
-	
-	SQL = """delete from right_side_2;"""
-	run_SQL(SQL, commit_indic='y')
-	data_dict = list_to_dict(new_data)
-	dict_to_sqlite(data_dict, "right_side_2")
+				del data[i]
+				return sorted(data, key = lambda num: int(num['top']), reverse=False), passed
 
-	return new_data, passed
+	return sorted(data, key = lambda num: int(num['top']), reverse=False), passed
 
 def group_by_columns():
-	SQL = """drop table if exists right_side_1;"""
+	SQL = """drop table if exists right_side;"""
 	run_SQL(SQL, commit_indic='y')
-
 	#all the data on this page
 	SQL = """
-		create table right_side_1 as
+		create table right_side as
 		select cast(left as 'decimal') as left, text, cast(top as 'decimal') as top
 		from image_table
 		where text not in ('$',' ')
@@ -148,27 +152,25 @@ def group_by_columns():
 	run_SQL(SQL, commit_indic='y')
 	
 	#order left to right
-	SQL = """select distinct text, left, top from right_side_1 order by cast(left as 'decimal') asc;"""
+	SQL = """select distinct text, left, top from right_side order by cast(left as 'decimal') asc;"""
+	data = run_SQL(SQL)
 	for i in range(0,20):	
-		data = run_SQL(SQL)
 		data, passed = left_rule(data)
 		print("Passed left on run " + str(i) + "? --> " + str(passed))
 		if(passed==0):
 			break
-	data = run_SQL(SQL)
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"right_side_1")
 	
 	#order top to bottom
-	SQL = """select distinct text, left, top from right_side_2 order by cast(top as 'decimal') asc;"""
-
-	for i in range(0,20):
-		data = run_SQL(SQL)
+	SQL = """select distinct text, left, top from right_side_1 order by cast(top as 'decimal') asc;"""
+	data = run_SQL(SQL)
+	for i in range(0,40):
+		print("Length input data: " + str(len(data)))
 		data, passed = top_rule(data)
 		print("Passed top on run " + str(i) + "? --> " + str(passed))
 		if(passed==0):
 			break
-	data = run_SQL(SQL)
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"right_side_2")
 

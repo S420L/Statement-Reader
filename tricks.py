@@ -91,7 +91,6 @@ def send_to_excel(path, data, workbook, sheet="Sheet1", clear_indic='n', cells=N
     wb.save(excel_file)
 
 def list_to_dict(data_list):
-	print(data_list[0])
 	keys = list(data_list[0].keys())
 	data_dict = {i: [] for i in keys}
 	for i in range(0,len(data_list)):
