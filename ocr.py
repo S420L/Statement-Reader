@@ -62,9 +62,10 @@ def left_rule(data):
 	left_thresh = 69
 	passed = 0
 	for i in range(0,len(data)):
+		left = int(data[i]['left'])
 		if(i==0):
-			if(int(data[i+1]['left'])>int(data[i]['left'])+left_thresh):
-				print("Removing...")
+			if(int(data[i+1]['left'])>(left + left_thresh)):
+				print("Removing...(first element)")
 				print(data[i])
 				print("_________________________________")
 				passed = 1
@@ -73,8 +74,8 @@ def left_rule(data):
 			else:
 				continue
 		elif(i==len(data)-1):
-			if(int(data[i]['left'])>int(data[i-1]['left'])+left_thresh):
-				print("Removing...")
+			if(left > int(data[i-1]['left'])+left_thresh):
+				print("Removing...(last element)")
 				print(data[i])
 				print("_________________________________")
 				passed = 1
@@ -82,8 +83,8 @@ def left_rule(data):
 				return data, passed
 			else:
 				continue
-		elif(int(data[i]['left'])>int(data[i-1]['left'])+left_thresh and int(data[i+1]['left'])>int(data[i]['left'])+left_thresh):
-			print("Removing...")
+		elif((left > (int(data[i-1]['left']) + left_thresh) and int(data[i+1]['left'])>(left+left_thresh))):
+			print("Removing...(too much space above and below)")
 			print(data[i])
 			print("_________________________________")
 			passed = 1
@@ -99,7 +100,7 @@ def top_rule(data):
 	-- force table like structure onto data on right side of page
 	-- things need to be in groups of twos, threes, etc...
 	'''
-	top_thresh = 2
+	top_thresh = 4
 	passed = 0
 	for i in range(0,len(data),3):
 		top = int(data[i]['top'])
@@ -115,16 +116,20 @@ def top_rule(data):
 				print("_________________________________")
 				passed = 1
 				del data[i]
-				return sorted(data, key = lambda num: int(num['top']), reverse=False), passed
+				return data, passed
 			if(top<int(data[i+1]['top']) + top_thresh and top<int(data[i+2]['top']) + top_thresh and top+top_thresh<int(data[i+3]['top'])):
 				continue
 			else:
 				print("Removing... (group too large)")
-				print(data[i])
+				remove_list = []
+				for j in range(0,len(data)):
+					if((int(data[j]['top'])<=top+top_thresh) and (int(data[j]['top'])>=top-top_thresh)):
+						remove_list.append(data[j])
+						print(data[j])
+				data = [k for k in data if k['text'] not in [k['text'] for k in remove_list]]
 				print("_________________________________")
 				passed = 1
-				del data[i]
-				return sorted(data, key = lambda num: int(num['top']), reverse=False), passed
+				return data, passed
 		elif(i<len(data)-3):
 			if((top + top_thresh)>int(data[i+1]['top']) and (top + top_thresh)>int(data[i+2]['top'])):
 				pass
@@ -134,9 +139,19 @@ def top_rule(data):
 				print("_________________________________")
 				passed = 1
 				del data[i]
-				return sorted(data, key = lambda num: int(num['top']), reverse=False), passed
+				return data, passed
 
-	return sorted(data, key = lambda num: int(num['top']), reverse=False), passed
+	return data, passed
+
+def detect_gaps(data):
+	lefts = [int(i['left']) for i in data]
+	gap_thresh = 69
+	results = []
+	for i in range(0,len(lefts)):
+		if(i<len(lefts)-1):
+			if((int(lefts[i+1])-int(lefts[i])) > gap_thresh):
+				results.append(int((int(lefts[i+1])-int(lefts[i]))/2 + int(lefts[i])))
+	return sorted(results, key = lambda num: num, reverse=False)
 
 def group_by_columns():
 	SQL = """drop table if exists right_side;"""
@@ -151,45 +166,41 @@ def group_by_columns():
 		order by cast(top as 'decimal') asc, cast(left as 'decimal') asc;"""
 	run_SQL(SQL, commit_indic='y')
 	
-	#order left to right
-	SQL = """select distinct text, left, top from right_side order by cast(left as 'decimal') asc;"""
+	#process data top to bottom
+	SQL = """select distinct text, left, top from right_side order by cast(top as 'decimal') asc;"""
 	data = run_SQL(SQL)
-	for i in range(0,20):	
-		data, passed = left_rule(data)
-		print("Passed left on run " + str(i) + "? --> " + str(passed))
+	for i in range(0,69):
+		print("Length input data: " + str(len(data)))
+		data, passed = top_rule(data)
 		if(passed==0):
+			print("Passed top on run " + str(i) + "? --> " + str(passed))
 			break
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"right_side_1")
-	
-	#order top to bottom
-	SQL = """select distinct text, left, top from right_side_1 order by cast(top as 'decimal') asc;"""
+
+	#process data left to right
+	SQL = """select distinct text, left, top from right_side_1 order by cast(left as 'decimal') asc;"""
 	data = run_SQL(SQL)
-	for i in range(0,40):
-		print("Length input data: " + str(len(data)))
-		data, passed = top_rule(data)
-		print("Passed top on run " + str(i) + "? --> " + str(passed))
+	for i in range(0,69):	
+		data, passed = left_rule(data)
 		if(passed==0):
+			print("Passed left on run " + str(i) + "? --> " + str(passed))
 			break
+
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"right_side_2")
 
-	SQL = """drop table if exists right_side_3;"""
-	run_SQL(SQL, commit_indic='y')
-	SQL = """
-		create table right_side_3 as
-		select distinct text, left, top, group_num
-		from (
-		select a.text, cast(left as 'decimal') as left, cast(top as 'decimal') as top, case
-		when cast(left as 'decimal') between 0 and (((select max(cast(left as 'decimal')) from right_side_2)-(select min(cast(left as 'decimal')) from right_side_2))*1/3+(select min(cast(left as 'decimal')) from right_side_2)) then "group 1"
-		when cast(left as 'decimal') between (((select max(cast(left as 'decimal')) from right_side_2)-(select min(cast(left as 'decimal')) from right_side_2))*1/3+(select min(cast(left as 'decimal')) from right_side_2)) 
-		and (((select max(cast(left as 'decimal')) from right_side_2)-(select min(cast(left as 'decimal')) from right_side_2))*2/3+(select min(cast(left as 'decimal')) from right_side_2)) then "group 2"
-		when left between (((select max(cast(left as 'decimal')) from right_side_2)-(select min(cast(left as 'decimal')) from right_side_1))*2/3+(select min(cast(left as 'decimal')) from right_side_1)) 
-		and (((select max(cast(left as 'decimal')) from right_side_2)-(select min(cast(left as 'decimal')) from right_side_2))*3/3+(select min(cast(left as 'decimal')) from right_side_2)) then "group 3"
-		end as group_num
-		from right_side_2 a) b;
-		"""
-	run_SQL(SQL, commit_indic='y')
+	SQL = """select distinct text, left, top from right_side_2 order by cast(left as 'decimal') asc;"""
+	data = run_SQL(SQL)
+	results = detect_gaps(data)
+	print(results)
+
+	#SQL = """drop table if exists right_side_3;"""
+	#run_SQL(SQL, commit_indic='y')
+	#SQL = ""
+	#for i in results:
+
+	#run_SQL(SQL, commit_indic='y')
 
 def fix_image_lines(image_lines):
 	'''part 2 of algorithm, fix reweighted list items so they're grouped right
@@ -246,7 +257,8 @@ def remove_lines(filename):
 #gui
 Tk().withdraw()
 #filename = askopenfilename()
-filename = os.path.abspath(os.path.dirname( __file__ ))+'\\9f9416d6-7507-4822-a10e-07cfdbce3157-2.ppm' #manual for testing
+#filename = os.path.abspath(os.path.dirname( __file__ ))+'\\9f9416d6-7507-4822-a10e-07cfdbce3157-2.ppm' #manual for testing
+filename = os.path.abspath(os.path.dirname( __file__ ))+'\ca20ad42-8201-4cfe-af72-9965f25f53e9-4.ppm' #manual for testing
 
 #if it's a PDF, convert to image first
 start_time = time.time()
