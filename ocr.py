@@ -96,16 +96,14 @@ def left_rule(data):
 	return data, passed
 
 def top_rule(data):
-	'''
-	-- force table like structure onto data on right side of page
-	-- things need to be in groups of twos, threes, etc...
+	'''force table like structure onto data on right side of page by grouping numbers together in twos, threes, etc.
 	'''
 	top_thresh = 4
 	passed = 0
 	for i in range(0,len(data),3):
 		top = int(data[i]['top'])
 		if(i<len(data)-4):
-			if((top + top_thresh)>int(data[i+1]['top']) and (top + top_thresh)>int(data[i+2]['top'])):
+			if((top + top_thresh)>int(data[i+1]['top']) and (top + top_thresh)>int(data[i+2]['top'])): #remove groups smaller than # columns
 				pass
 			else:
 				print("Removing...(group too small)")
@@ -117,7 +115,7 @@ def top_rule(data):
 				passed = 1
 				del data[i]
 				return data, passed
-			if(top<int(data[i+1]['top']) + top_thresh and top<int(data[i+2]['top']) + top_thresh and top+top_thresh<int(data[i+3]['top'])):
+			if(top<int(data[i+1]['top']) + top_thresh and top<int(data[i+2]['top']) + top_thresh and top+top_thresh<int(data[i+3]['top'])): #remove groups larger than # columns
 				continue
 			else:
 				print("Removing... (group too large)")
@@ -144,8 +142,10 @@ def top_rule(data):
 	return data, passed
 
 def detect_gaps(data):
-	lefts = [int(i['left']) for i in data]
-	gap_thresh = 69
+	'''figure out how many columns there are and approximate values to use when grouping in the case/when statement
+	'''
+	lefts = [int(i['left']) for i in data] #ordered list of data from left to right
+	gap_thresh = 69 #any space greater than this must be a column break
 	results = []
 	for i in range(0,len(lefts)):
 		if(i<len(lefts)-1):
@@ -154,9 +154,10 @@ def detect_gaps(data):
 	return sorted(results, key = lambda num: num, reverse=False)
 
 def group_by_columns():
+	'''get table from right side of the page
+	'''
 	SQL = """drop table if exists right_side;"""
 	run_SQL(SQL, commit_indic='y')
-	#all the data on this page
 	SQL = """
 		create table right_side as
 		select cast(left as 'decimal') as left, text, cast(top as 'decimal') as top
@@ -165,9 +166,7 @@ def group_by_columns():
 		and cast(left as 'decimal')>(select max(cast(left as 'decimal'))/2 from image_table)
 		order by cast(top as 'decimal') asc, cast(left as 'decimal') asc;"""
 	run_SQL(SQL, commit_indic='y')
-	
-	#process data top to bottom
-	SQL = """select distinct text, left, top from right_side order by cast(top as 'decimal') asc;"""
+	SQL = """select distinct text, left, top from right_side order by cast(top as 'decimal') asc;""" #all data on the right half of the page, ordered top to bottom
 	data = run_SQL(SQL)
 	for i in range(0,69):
 		print("Length input data: " + str(len(data)))
@@ -223,6 +222,8 @@ def fix_image_lines(image_lines):
 	return return_list
 
 def save_image_data(image_data):
+	'''save cleaned data from OCR program
+	'''
 	columns = ['left','top','width','height','text']
 	data_dict = {i:[] for i in columns}
 	for i in range(0,len(image_data['text'])):
@@ -237,7 +238,7 @@ def save_image_data(image_data):
 	return
 
 def remove_lines(filename):
-	""" get rid of horizontal lines in the financial statement (interfears with optical character recognition)
+	"""get rid of horizontal lines in the financial statement (interfears with OCR)
 	"""
 	img = imread(filename)
 	gry = cvtColor(img, COLOR_BGR2GRAY)
@@ -253,6 +254,141 @@ def remove_lines(filename):
 	imwrite(filename, gry)
 	image_data = Tessa_image_to_data(thr, output_type = Output.DICT)
 	return image_data, filename
+
+def replace_dashes(image_lines):
+	'''turn dashes into zeros, reposition dashes so that the "top" value isn't so different from other numbers
+	'''
+	for i in range(0,len(image_lines)):
+		for j in range(0,len(image_lines[i])):
+			if(image_lines[i][j]['text'].strip()==b'\xe2\x80\x94'.decode('utf-8')):
+				image_lines[i][j]['text'] = str(0)
+				image_lines[i][j]['top'] = float(image_lines[i][j]['top']) - 10
+			elif(image_lines[i][j]['text'].strip()[0]=="(" and image_lines[i][j]['text'][-1].strip()==")"):
+				if(image_lines[i][j]['text'].replace("(","").replace(")","").replace("0.","").replace(".","").strip().isdigit()):
+					image_lines[i][j]['text'] = str("—" + image_lines[i][j]['text'][1:-1])
+	return image_lines
+
+def get_lines(full_image_data):
+	SQL = """delete from financials;"""
+	run_SQL(SQL, commit_indic='y')
+	for image_data in full_image_data:
+		temp_data = {'text': [], 'top': [], 'left': [], 'line_num': []}
+		for i in range(0,len(image_data['text'])):
+			if(image_data['text'][i]!=""):
+				temp_data['text'].append(image_data['text'][i])
+				temp_data['top'].append(image_data['top'][i])
+				temp_data['left'].append(image_data['left'][i])
+				temp_data['line_num'].append(image_data['line_num'][i])
+		image_data = temp_data
+		image_lines = [[{key: image_data[key][0] for key in ('text','top','left')}]]
+		image_lines[0][0]['line_num'] = 0
+		tack_on = []
+		line_num = 1 
+		for i in range(0,len(image_data['text'])):
+			if image_data['left'][i]<100:
+				if(image_data['top'][i]>image_lines[len(image_lines)-1][0]['top']+5):
+					line = {key: image_data[key][i] for key in ('text','top','left','line_num')}
+					line['line_num'] = line_num
+					line_num+=1
+					image_lines.append([line])
+				else:
+					tack_on.append({key: image_data[key][i] for key in ('text','top','left','line_num')})
+			else:
+				tack_on.append({key: image_data[key][i] for key in ('text','top','left','line_num')})
+
+		tack_on = sorted(tack_on, key = lambda num: num['top'], reverse=True)
+		for i in tack_on:
+			image_lines[-1].append(i)
+		max_line_num = len(image_lines)-1
+		
+		for i in range(0,len(image_lines[-1])):
+			image_lines[-1][i]['line_num'] = max_line_num
+
+		for i in range(0,len(image_lines)):
+			image_lines[i] = [k for k in image_lines[i] if k['text'].strip()!=""]
+
+		image_lines = replace_dashes(image_lines)
+
+		#original_image_lines = [i for i in image_lines]
+
+		#for i in image_lines:
+		#	print(i[0]['text'])
+		#	print(i[0]['line_num'])
+		#for i in image_lines:
+		#	print(min([j['line_num'] for j in i]))
+		#for i in image_lines:
+		#	print(len(i))
+		#for i in image_lines:
+		#	if(len(i)>0):
+		#		print(i[0]['text'])
+
+		for i in range(0,100):	
+			image_lines, passed = group_by_lines(image_lines)
+			image_lines = fix_image_lines(image_lines)
+
+		# sort lines left to right
+		for i in range(0,len(image_lines)):
+			image_lines[i] = sorted(image_lines[i], key = lambda var: var['left'], reverse = False)
+
+		for i in range(0,len(image_lines)):
+			for j in range(1,len(image_lines[i])):
+				if(image_lines[i][j]['text']==image_lines[i][j-1]['text'] and image_lines[i][j]['top']==image_lines[i][j-1]['top']):
+					image_lines[i][j]['text'] = ""
+
+		print("Passed? " + str(passed))
+		print("___________________________________")
+		print([i for i in image_lines[0]])
+		print("___________________________________")
+		print([i['text'] for i in image_lines[1]])
+		print("___________________________________")
+		print([i['text'] for i in image_lines[7]])
+
+		for i in range(0,len(image_lines)):
+			image_lines[i] = {'text': [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").strip().lower())>0]}
+		company_name = "UNKNOWN"
+		for i in image_lines:
+			for j in range(0,len(i['text'])):
+				if 'inc.' in i['text'][j] or 'llc.' in i['text'][j]:
+					try:
+						company_name = i['text'][j-1]
+					except:
+						company_name = 'INC AT START OF LINE'
+		
+		for i in range(0,len(image_lines)):
+			values = []
+			variable = ""
+			for j in image_lines[i]['text']:
+				if(j.replace(b'\xe2\x80\x94'.decode('utf-8'),"").replace("0.","").replace(".","").replace("-","").strip().isdigit()):
+					values.append(j)
+				else:
+					variable += " " + str(j)
+			image_lines[i]['variable'] = variable.replace("\"","")
+			image_lines[i]['values'] = values
+			
+		data_dict = {'rank': [],'variable': [], 'year': [], 'value': []}
+		num_years = most_frequent([len(i['values']) for i in image_lines])
+
+		for i in range(0,len(image_lines)):
+			if(len(image_lines[i]['values'])==num_years and image_lines[i]['variable']!=""):
+				for j in range(0,num_years):
+					data_dict['rank'].append(str(i))
+					data_dict['variable'].append(image_lines[i]['variable'].strip().lower())
+					data_dict['year'].append(str(2020-j))
+					data_dict['value'].append(image_lines[i]['values'][j])
+			elif(len(image_lines[i]['values'])==0 and image_lines[i]['variable']!=""):
+				data_dict['rank'].append(str(i))
+				data_dict['variable'].append(image_lines[i]['variable'].strip().lower())
+				data_dict['year'].append("HEADING")
+				data_dict['value'].append("HEADING")
+
+		print("_____Inputting first half______")
+		[print(len(data_dict[i])) for i in data_dict.keys()]
+		dict_to_sqlite(data_dict, "financials_temp_1")
+		SQL = """
+		insert into financials
+		select * from financials_temp_1;
+		"""
+		run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
 
 #gui
 Tk().withdraw()
@@ -276,137 +412,11 @@ for image in images:
 	full_image_data.append(image_data)
 	os.remove(filename)
 
+get_lines(full_image_data)
+
 group_by_columns()
 import sys
 sys.exit(0)
-
-SQL = """delete from financials;"""
-run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
-for image_data in full_image_data:
-	temp_data = {'text': [], 'top': [], 'left': [], 'line_num': []}
-	for i in range(0,len(image_data['text'])):
-		if(image_data['text'][i]!=""):
-			temp_data['text'].append(image_data['text'][i])
-			temp_data['top'].append(image_data['top'][i])
-			temp_data['left'].append(image_data['left'][i])
-			temp_data['line_num'].append(image_data['line_num'][i])
-	image_data = temp_data
-	image_lines = [[{key: image_data[key][0] for key in ('text','top','left')}]]
-	image_lines[0][0]['line_num'] = 0
-	tack_on = []
-	line_num = 1 
-	for i in range(0,len(image_data['text'])):
-		if image_data['left'][i]<100:
-			if(image_data['top'][i]>image_lines[len(image_lines)-1][0]['top']+5):
-				line = {key: image_data[key][i] for key in ('text','top','left','line_num')}
-				line['line_num'] = line_num
-				line_num+=1
-				image_lines.append([line])
-			else:
-				tack_on.append({key: image_data[key][i] for key in ('text','top','left','line_num')})
-		else:
-			tack_on.append({key: image_data[key][i] for key in ('text','top','left','line_num')})
-
-	tack_on = sorted(tack_on, key = lambda num: num['top'], reverse=True)
-	for i in tack_on:
-		image_lines[-1].append(i)
-	max_line_num = len(image_lines)-1
-	
-	for i in range(0,len(image_lines[-1])):
-		image_lines[-1][i]['line_num'] = max_line_num
-
-	for i in range(0,len(image_lines)):
-		image_lines[i] = [k for k in image_lines[i] if k['text'].strip()!=""]
-
-	for i in range(0,len(image_lines)):
-		for j in range(0,len(image_lines[i])):
-			if(image_lines[i][j]['text'].strip()==b'\xe2\x80\x94'.decode('utf-8')):
-				image_lines[i][j]['text'] = str(0)
-				image_lines[i][j]['top'] = float(image_lines[i][j]['top']) - 10
-			elif(image_lines[i][j]['text'].strip()[0]=="(" and image_lines[i][j]['text'][-1].strip()==")"):
-				if(image_lines[i][j]['text'].replace("(","").replace(")","").replace("0.","").replace(".","").strip().isdigit()):
-					image_lines[i][j]['text'] = str("—" + image_lines[i][j]['text'][1:-1])
-
-	original_image_lines = [i for i in image_lines]
-
-	#for i in image_lines:
-	#	print(i[0]['text'])
-	#	print(i[0]['line_num'])
-	#for i in image_lines:
-	#	print(min([j['line_num'] for j in i]))
-	#for i in image_lines:
-	#	print(len(i))
-	#for i in image_lines:
-	#	if(len(i)>0):
-	#		print(i[0]['text'])
-
-	for i in range(0,100):	
-		image_lines, passed = group_by_lines(image_lines)
-		image_lines = fix_image_lines(image_lines)
-
-	# sort lines left to right
-	for i in range(0,len(image_lines)):
-		image_lines[i] = sorted(image_lines[i], key = lambda var: var['left'], reverse = False)
-
-	for i in range(0,len(image_lines)):
-		for j in range(1,len(image_lines[i])):
-			if(image_lines[i][j]['text']==image_lines[i][j-1]['text'] and image_lines[i][j]['top']==image_lines[i][j-1]['top']):
-				image_lines[i][j]['text'] = ""
-
-	print("Passed? " + str(passed))
-	print("___________________________________")
-	print([i for i in image_lines[0]])
-	print("___________________________________")
-	print([i['text'] for i in image_lines[1]])
-	print("___________________________________")
-	print([i['text'] for i in image_lines[7]])
-
-	for i in range(0,len(image_lines)):
-		image_lines[i] = {'text': [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").strip().lower())>0]}
-	company_name = "UNKNOWN"
-	for i in image_lines:
-		for j in range(0,len(i['text'])):
-			if 'inc.' in i['text'][j] or 'llc.' in i['text'][j]:
-				try:
-					company_name = i['text'][j-1]
-				except:
-					company_name = 'INC AT START OF LINE'
-	
-	for i in range(0,len(image_lines)):
-		values = []
-		variable = ""
-		for j in image_lines[i]['text']:
-			if(j.replace(b'\xe2\x80\x94'.decode('utf-8'),"").replace("0.","").replace(".","").replace("-","").strip().isdigit()):
-				values.append(j)
-			else:
-				variable += " " + str(j)
-		image_lines[i]['variable'] = variable.replace("\"","")
-		image_lines[i]['values'] = values
-		
-	data_dict = {'rank': [],'variable': [], 'year': [], 'value': []}
-	num_years = most_frequent([len(i['values']) for i in image_lines])
-
-	for i in range(0,len(image_lines)):
-		if(len(image_lines[i]['values'])==num_years and image_lines[i]['variable']!=""):
-			for j in range(0,num_years):
-				data_dict['rank'].append(str(i))
-				data_dict['variable'].append(image_lines[i]['variable'].strip().lower())
-				data_dict['year'].append(str(2020-j))
-				data_dict['value'].append(image_lines[i]['values'][j])
-		elif(len(image_lines[i]['values'])==0 and image_lines[i]['variable']!=""):
-			data_dict['rank'].append(str(i))
-			data_dict['variable'].append(image_lines[i]['variable'].strip().lower())
-			data_dict['year'].append("HEADING")
-			data_dict['value'].append("HEADING")
-
-	print("_____Inputting first half______")
-	[print(len(data_dict[i])) for i in data_dict.keys()]
-	dict_to_sqlite(data_dict, "financials_temp_1")
-	SQL = """
-	insert into financials
-	select * from financials_temp_1;
-	"""
-	run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
 
 SQL = """
 	select * from (
