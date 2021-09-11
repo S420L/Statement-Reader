@@ -38,9 +38,9 @@ def pdf_to_image(filename):
 		return filenames
 
 def group_by_lines(image_lines):
-	'''
-	 --  do the iterative migration top to bottom, if an element is too close to the top of the page to be in its index then move down by one
-	 -- "passed" indicates weather or not the algorithm has yet converged
+	'''Iterative algorithm: 
+		-- if an element is too close to the top of the page to be in its line_num then move down one level
+		-- passed==0 if algorithm has converged
 	'''
 	passed = 0
 	for i in range(0,len(image_lines)):
@@ -55,9 +55,9 @@ def group_by_lines(image_lines):
 	return image_lines, passed
 
 def left_rule(data):
-	'''
-	-- get rid of extra stuff that may be above/below table or in the middle of the page
-	-- another way of detecting if there's too much empty space above or below a word
+	'''Iterative algorithm:
+		--  makes sure data is clustered and there isn't data outside the columns
+		-- practically this would trigger if there's lots of space above or below a word
 	'''
 	left_thresh = 69
 	passed = 0
@@ -96,7 +96,8 @@ def left_rule(data):
 	return data, passed
 
 def top_rule(data):
-	'''force table like structure onto data on right side of page by grouping numbers together in twos, threes, etc.
+	'''Iterative algorithm:
+		-- force table structure on the data, putting numbers into groups of size N
 	'''
 	top_thresh = 4
 	passed = 0
@@ -138,7 +139,6 @@ def top_rule(data):
 				passed = 1
 				del data[i]
 				return data, passed
-
 	return data, passed
 
 def detect_gaps(data):
@@ -242,7 +242,7 @@ def remove_lines(filename):
 	"""
 	img = imread(filename)
 	gry = cvtColor(img, COLOR_BGR2GRAY)
-	lns = ximgproc.createFastLineDetector(length_threshold=20).detect(gry)
+	lns = ximgproc.createFastLineDetector(length_threshold=20).detect(gry) 
 	if lns is not None:
 		for ln in lns:
 			(x_start, y_start, x_end, y_end) = [int(i) for i in ln[0]]
@@ -268,10 +268,16 @@ def replace_dashes(image_lines):
 					image_lines[i][j]['text'] = str("—" + image_lines[i][j]['text'][1:-1])
 	return image_lines
 
-def get_lines(full_image_data):
+def scrape_financials(full_image_data):
+
+	#clear out temp table
 	SQL = """delete from financials;"""
 	run_SQL(SQL, commit_indic='y')
+
+	#apply table processing logic to each image
 	for image_data in full_image_data:
+
+		#initialize data for single page
 		temp_data = {'text': [], 'top': [], 'left': [], 'line_num': []}
 		for i in range(0,len(image_data['text'])):
 			if(image_data['text'][i]!=""):
@@ -280,10 +286,16 @@ def get_lines(full_image_data):
 				temp_data['left'].append(image_data['left'][i])
 				temp_data['line_num'].append(image_data['line_num'][i])
 		image_data = temp_data
+
+		#initialize list of lists data structure, line_num scheme
 		image_lines = [[{key: image_data[key][0] for key in ('text','top','left')}]]
 		image_lines[0][0]['line_num'] = 0
 		tack_on = []
-		line_num = 1 
+		line_num = 1
+
+		print(image_data['text'][0:10]) #what order is stuff coming from OCR?
+		
+		#only consider words within 100 of left side of page as a line marker
 		for i in range(0,len(image_data['text'])):
 			if image_data['left'][i]<100:
 				if(image_data['top'][i]>image_lines[len(image_lines)-1][0]['top']+5):
@@ -294,22 +306,20 @@ def get_lines(full_image_data):
 				else:
 					tack_on.append({key: image_data[key][i] for key in ('text','top','left','line_num')})
 			else:
-				tack_on.append({key: image_data[key][i] for key in ('text','top','left','line_num')})
+				tack_on.append([{key: image_data[key][i] for key in ('text','top','left','line_num')}])
 
+		#last item in list includes all other data, sorted from top to bottom
 		tack_on = sorted(tack_on, key = lambda num: num['top'], reverse=True)
 		for i in tack_on:
 			image_lines[-1].append(i)
 		max_line_num = len(image_lines)-1
-		
 		for i in range(0,len(image_lines[-1])):
 			image_lines[-1][i]['line_num'] = max_line_num
-
 		for i in range(0,len(image_lines)):
 			image_lines[i] = [k for k in image_lines[i] if k['text'].strip()!=""]
-
 		image_lines = replace_dashes(image_lines)
 
-		#original_image_lines = [i for i in image_lines]
+		print(str(max_line_num) + " lines initialized!!! :D !!!")
 
 		#for i in image_lines:
 		#	print(i[0]['text'])
@@ -412,7 +422,7 @@ for image in images:
 	full_image_data.append(image_data)
 	os.remove(filename)
 
-get_lines(full_image_data)
+scrape_financials(full_image_data)
 
 group_by_columns()
 import sys
