@@ -1,22 +1,15 @@
 import os
-import tempfile
 import time
+import tempfile
 from tkinter import Tk
-from tkinter.filedialog import askopenfilename
-
-import pandas as pd
+from pytesseract import Output
+from pdf2image import convert_from_path
+from pytesseract import image_to_data, image_to_string
+from tricks import (dict_to_sqlite, list_to_dict, most_frequent, run_SQL, 
+					send_to_excel)
 from cv2 import (ADAPTIVE_THRESH_MEAN_C, COLOR_BGR2GRAY, THRESH_BINARY,
                  adaptiveThreshold, cvtColor, imread, imshow, imwrite, line,
                  rectangle, waitKey, ximgproc)
-from pdf2image import convert_from_path
-from pytesseract import Output
-from pytesseract import image_to_data as Tessa_image_to_data
-from pytesseract import image_to_string as Tessa_image_to_string
-
-from tricks import (dict_to_sqlite, list_to_dict, most_frequent, run_SQL,
-                    send_to_excel)
-
-pd.options.mode.chained_assignment = None  # default='warn'
 
 def show_rectangles(image_data, filename):
 	'''function for showing borders around words (visualize the data from image_to_data)
@@ -29,8 +22,9 @@ def show_rectangles(image_data, filename):
 	waitKey(0)
 	return
 
-#get image from PDF
 def pdf_to_image(filename):
+	'''OCR only works on images, so convert all pdfs to a list of images
+	'''
 	with tempfile.TemporaryDirectory() as path:
 		images_from_path = convert_from_path(filename, output_folder=os.path.abspath(os.path.dirname(__file__)))
 		print('running for image: ' + str(images_from_path))
@@ -56,7 +50,7 @@ def group_by_lines(image_lines):
 
 def left_rule(data):
 	'''Iterative algorithm:
-		--  makes sure data is clustered and there isn't data outside the columns
+		-- makes sure data is clustered and there isn't data outside the columns
 		-- practically this would trigger if there's lots of space above or below a word
 	'''
 	left_thresh = 69
@@ -168,11 +162,13 @@ def group_by_columns():
 	run_SQL(SQL, commit_indic='y')
 	SQL = """select distinct text, left, top from right_side order by cast(top as 'decimal') asc;""" #all data on the right half of the page, ordered top to bottom
 	data = run_SQL(SQL)
+	time_a  = time.time()
 	for i in range(0,69):
 		print("Length input data: " + str(len(data)))
 		data, passed = top_rule(data)
 		if(passed==0):
 			print("Passed top on run " + str(i) + "? --> " + str(passed))
+			print("Time taken: " + str(time.time()-time_a) + " seconds!")
 			break
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"right_side_1")
@@ -180,10 +176,12 @@ def group_by_columns():
 	#process data left to right
 	SQL = """select distinct text, left, top from right_side_1 order by cast(left as 'decimal') asc;"""
 	data = run_SQL(SQL)
+	time_a = time.time()
 	for i in range(0,69):	
 		data, passed = left_rule(data)
 		if(passed==0):
 			print("Passed left on run " + str(i) + "? --> " + str(passed))
+			print("Time taken: " + str(time.time()-time_a) + " seconds!")
 			break
 
 	data_dict = list_to_dict(data)
@@ -202,7 +200,8 @@ def group_by_columns():
 	#run_SQL(SQL, commit_indic='y')
 
 def fix_image_lines(image_lines):
-	'''part 2 of algorithm, fix reweighted list items so they're grouped right
+	'''part 2 of algorithm, fix data structure to force Python line index to equal line_num
+	   		-- force digits to be after words (TODO: flawed logic, should be ordered left to right)
 	'''
 	max_line_num = max([i['line_num'] for i in image_lines[-1]])
 	temp_list = [[] for i in range(0,max_line_num+1)]
@@ -238,8 +237,8 @@ def save_image_data(image_data):
 	return
 
 def remove_lines(filename):
-	"""get rid of horizontal lines in the financial statement (interfears with OCR)
-	"""
+	'''get rid of horizontal lines in the financial statement (interfears with OCR)
+	'''
 	img = imread(filename)
 	gry = cvtColor(img, COLOR_BGR2GRAY)
 	lns = ximgproc.createFastLineDetector(length_threshold=20).detect(gry) 
@@ -252,7 +251,9 @@ def remove_lines(filename):
 	thr = adaptiveThreshold(gry, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 21, 23)
 	filename = str(os.path.abspath(os.path.dirname(__file__))+"{}.png").format(os.getpid())
 	imwrite(filename, gry)
-	image_data = Tessa_image_to_data(thr, output_type = Output.DICT)
+	time_a = time.time()
+	image_data = image_to_data(thr, output_type = Output.DICT)
+	print("Time taken image_to_data: " + str(time.time()-time_a) + " seconds!")
 	return image_data, filename
 
 def replace_dashes(image_lines):
@@ -269,6 +270,8 @@ def replace_dashes(image_lines):
 	return image_lines
 
 def scrape_financials(full_image_data):
+	'''main thread of logic
+	'''
 
 	#clear out temp table
 	SQL = """delete from financials;"""
@@ -276,7 +279,7 @@ def scrape_financials(full_image_data):
 
 	#apply table processing logic to each image
 	for image_data in full_image_data:
-
+		time_a = time.time()
 		#initialize data for single page
 		temp_data = {'text': [], 'top': [], 'left': [], 'line_num': []}
 		for i in range(0,len(image_data['text'])):
@@ -293,8 +296,6 @@ def scrape_financials(full_image_data):
 		tack_on = []
 		line_num = 1
 
-		print(image_data['text'][0:10]) #what order is stuff coming from OCR?
-		
 		#only consider words within 100 of left side of page as a line marker
 		for i in range(0,len(image_data['text'])):
 			if image_data['left'][i]<100:
@@ -302,11 +303,12 @@ def scrape_financials(full_image_data):
 					line = {key: image_data[key][i] for key in ('text','top','left','line_num')}
 					line['line_num'] = line_num
 					line_num+=1
+					print(line)
 					image_lines.append([line])
 				else:
 					tack_on.append({key: image_data[key][i] for key in ('text','top','left','line_num')})
 			else:
-				tack_on.append([{key: image_data[key][i] for key in ('text','top','left','line_num')}])
+				tack_on.append({key: image_data[key][i] for key in ('text','top','left','line_num')})
 
 		#last item in list includes all other data, sorted from top to bottom
 		tack_on = sorted(tack_on, key = lambda num: num['top'], reverse=True)
@@ -320,25 +322,22 @@ def scrape_financials(full_image_data):
 		image_lines = replace_dashes(image_lines)
 
 		print(str(max_line_num) + " lines initialized!!! :D !!!")
+		print("Time to initialize lines: " + str(time.time()-time_a) + " seconds!")
 
-		#for i in image_lines:
-		#	print(i[0]['text'])
-		#	print(i[0]['line_num'])
-		#for i in image_lines:
-		#	print(min([j['line_num'] for j in i]))
-		#for i in image_lines:
-		#	print(len(i))
-		#for i in image_lines:
-		#	if(len(i)>0):
-		#		print(i[0]['text'])
-
+		time_a = time.time()
 		for i in range(0,100):	
 			image_lines, passed = group_by_lines(image_lines)
 			image_lines = fix_image_lines(image_lines)
+			if(passed==0):
+				print("___ Passed image lines sort on run ___: " + str(i) + " --> ")
+				break
+		print("___ Time taken to sort image lines ___: " + str(time.time()-time_a) + " seconds!")
 
 		# sort lines left to right
+		time_a = time.time()
 		for i in range(0,len(image_lines)):
 			image_lines[i] = sorted(image_lines[i], key = lambda var: var['left'], reverse = False)
+		print("___ Time taken to sort image lines 2 ___: " + str(time.time()-time_a) + " seconds!")
 
 		for i in range(0,len(image_lines)):
 			for j in range(1,len(image_lines[i])):
@@ -409,7 +408,7 @@ filename = os.path.abspath(os.path.dirname( __file__ ))+'\ca20ad42-8201-4cfe-af7
 #if it's a PDF, convert to image first
 start_time = time.time()
 try:
-	images = pdf_to_image(filename)
+	images = pdf_to_image(filename) 
 	print("PDF")
 except:
 	images = [filename]
@@ -417,14 +416,19 @@ except:
 
 full_image_data = []
 for image in images:
+	time_a = time.time()
 	image_data, filename = remove_lines(filename)
+	print("Time taken remove_lines: " + str(time.time()-time_a) + " seconds!")
+	time_a = time.time()
 	save_image_data(image_data) #put image data into SQL
+	print("Time taken save_image_data: " + str(time.time()-time_a) + " seconds!")
 	full_image_data.append(image_data)
 	os.remove(filename)
 
-scrape_financials(full_image_data)
+#scrape_financials(full_image_data)
 
 group_by_columns()
+
 import sys
 sys.exit(0)
 
