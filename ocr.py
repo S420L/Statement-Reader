@@ -201,7 +201,6 @@ def group_by_columns():
 	SQL = """select distinct text, left, top from right_side_2 order by cast(left as 'decimal') asc;"""
 	data = run_SQL(SQL)
 	results = [0] + detect_gaps(data)
-	print(results)
 	print("Time taken detect_gaps: " + str(time.time()-time_a) + " seconds!")
 
 	SQL = """drop table if exists right_side_3;"""
@@ -232,8 +231,19 @@ def group_by_columns():
 	dict_to_sqlite(data_dict,"right_side_4")
 
 	data = run_SQL("select * from right_side_4 order by cast(top as 'decimal') asc, cast(left as 'decimal');")
-
-
+	num_groups = int(run_SQL("select max(groupies) from right_side_4;")[0]['max(groupies)'].replace("group_","").strip())
+	variables = [i['text'] for i in data[0:num_groups]]
+	data = data[num_groups:]
+	print("VARIABLES!!!")
+	print(variables)
+	for i in range(0,len(data),num_groups):
+		for j in range(0,num_groups):
+			data[i+j]['variable'] = variables[j]
+	SQL = """drop table if exists right_side_5;"""
+	run_SQL(SQL, commit_indic='y')
+	data_dict = list_to_dict(data)
+	dict_to_sqlite(data_dict,"right_side_5")
+	
 
 
 def fix_image_lines(image_lines):
