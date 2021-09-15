@@ -1,5 +1,6 @@
 import os
 import re
+from sqlite3.dbapi2 import SQLITE_ALTER_TABLE
 import time
 import tempfile
 from tkinter import Tk
@@ -196,17 +197,44 @@ def group_by_columns():
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"right_side_2")
 
+	time_a = time.time()
 	SQL = """select distinct text, left, top from right_side_2 order by cast(left as 'decimal') asc;"""
 	data = run_SQL(SQL)
-	results = detect_gaps(data)
+	results = [0] + detect_gaps(data)
 	print(results)
+	print("Time taken detect_gaps: " + str(time.time()-time_a) + " seconds!")
 
-	#SQL = """drop table if exists right_side_3;"""
-	#run_SQL(SQL, commit_indic='y')
-	#SQL = ""
-	#for i in results:
+	SQL = """drop table if exists right_side_3;"""
+	run_SQL(SQL, commit_indic='y')
+	SQL = """
+		create table right_side_3 as
+		select distinct text, left, top, case
+		"""
+	counter = 1
+	for i in range(0,len(results)-1):
+		SQL += " when cast(left as 'decimal') between " + str(results[i]) + " and " + str(results[i+1]) + " then 'group_"+str(counter) + "'"
+		counter+=1
+	SQL += " when cast(left as 'decimal')>=" + str(results[-1]) + " then 'group_"+str(counter) + "'"
+	SQL += """ end as groupies
+		from right_side_2;
+		"""
+	print(SQL)
+	run_SQL(SQL, commit_indic='y')
 
-	#run_SQL(SQL, commit_indic='y')
+	data = run_SQL("select * from right_side_3 order by cast(top as 'decimal') asc;")
+	for i in range(0,len(data)-2,3):
+		top = str(data[i]['top'])
+		data[i+1]['top'] = top
+		data[i+2]['top'] = top
+	SQL = """drop table if exists right_side_4;"""
+	run_SQL(SQL, commit_indic='y')
+	data_dict = list_to_dict(data)
+	dict_to_sqlite(data_dict,"right_side_4")
+
+	data = run_SQL("select * from right_side_4 order by cast(top as 'decimal') asc, cast(left as 'decimal');")
+
+
+
 
 def fix_image_lines(image_lines):
 	'''part 2 of algorithm, fix data structure to force Python line index to equal line_num
@@ -347,11 +375,11 @@ def scrape_financials(full_image_data):
 				break
 		print("___ Time taken to sort image lines ___: " + str(time.time()-time_a) + " seconds!")
 
-		for i in image_lines:
-			for j in i:
-				if j['text']=='(G44)':
-					print("SWIGGA!")
-					print(i)
+		#for i in image_lines:
+		#	for j in i:
+		#		if j['text']=='(G44)':
+		#			print("SWIGGA!")
+		#			print(i)
 
 		# sort lines left to right
 		time_a = time.time()
@@ -373,9 +401,6 @@ def scrape_financials(full_image_data):
 						company_name = i['text'][j-1]
 					except:
 						company_name = 'INC AT START OF LINE'
-		
-		for i in range(0,4):
-			print(image_lines[i]['text'])
 
 		for i in range(0,len(image_lines)):
 			values = []
@@ -391,6 +416,11 @@ def scrape_financials(full_image_data):
 		data_dict = {'rank': [],'variable': [], 'year': [], 'value': []}
 		num_years = most_frequent([len(i['values']) for i in image_lines])
 
+		group_by_columns()
+
+		import sys
+		sys.exit(0)
+
 		for i in range(0,len(image_lines)):
 			if(len(image_lines[i]['values'])==num_years and image_lines[i]['variable']!=""):
 				for j in range(0,num_years):
@@ -404,7 +434,7 @@ def scrape_financials(full_image_data):
 				data_dict['year'].append("HEADING")
 				data_dict['value'].append("HEADING")
 
-		print("_____Inputting scraped financials from page______")
+		print("Inputting scraped financial data...")
 		#[print(len(data_dict[i])) for i in data_dict.keys()]
 		dict_to_sqlite(data_dict, "financials_temp_1")
 		SQL = """
