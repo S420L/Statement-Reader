@@ -167,7 +167,7 @@ def detect_gaps(data):
 				results.append(int((int(lefts[i+1])-int(lefts[i]))/2 + int(lefts[i])))
 	return sorted(results, key = lambda num: num, reverse=False)
 
-def group_by_columns():
+def group_by_columns(image_lines, num_years):
 	'''get table from right side of the page
 	'''
 	SQL = """drop table if exists right_side;"""
@@ -232,17 +232,25 @@ def group_by_columns():
 
 	data = run_SQL("select * from right_side_4 order by cast(top as 'decimal') asc, cast(left as 'decimal');")
 	num_groups = int(run_SQL("select max(groupies) from right_side_4;")[0]['max(groupies)'].replace("group_","").strip())
-	variables = [i['text'] for i in data[0:num_groups]]
+	columns = [i['text'] for i in data[0:num_groups]]
 	data = data[num_groups:]
-	print("VARIABLES!!!")
-	print(variables)
 	for i in range(0,len(data),num_groups):
 		for j in range(0,num_groups):
-			data[i+j]['variable'] = variables[j]
+			data[i+j]['column'] = columns[j]
+
+	for i in range(0,len(data)):
+		for j in range(0,len(image_lines)):
+			if(int(data[i]['top'])<=int(image_lines[j]['top'])+4 and int(data[i]['top'])>=int(image_lines[j]['top'])-4):
+				data[i]['variable'] = image_lines[j]['variable']
+
+	data = [i for i in data if 'variable' in i.keys()]
+
 	SQL = """drop table if exists right_side_5;"""
 	run_SQL(SQL, commit_indic='y')
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"right_side_5")
+
+
 	
 
 
@@ -402,7 +410,7 @@ def scrape_financials(full_image_data):
 					image_lines[i][j]['text'] = ""
 
 		for i in range(0,len(image_lines)):
-			image_lines[i] = {'text': [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").strip().lower())>0]}
+			image_lines[i] = {'text': [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").strip().lower())>0], 'top': image_lines[i][0]['top']}
 		company_name = "UNKNOWN"
 		for i in image_lines:
 			for j in range(0,len(i['text'])):
@@ -426,7 +434,7 @@ def scrape_financials(full_image_data):
 		data_dict = {'rank': [],'variable': [], 'year': [], 'value': []}
 		num_years = most_frequent([len(i['values']) for i in image_lines])
 
-		group_by_columns()
+		group_by_columns(image_lines, num_years)
 
 		import sys
 		sys.exit(0)
