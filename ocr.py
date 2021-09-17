@@ -99,16 +99,17 @@ def implement_left_rule(data):
 			break
 	return data
 
-def top_rule(data,num_cols):
+def implement_top_rule(data,num_cols):
 	'''Iterative algorithm:
 		-- force table structure on the data, putting numbers into groups of size N
 	'''
 	python = """
-top_thresh = 4
-passed = 0
-for i in range(0,len(data),"""+str(num_cols)+"""):
-    top = int(data[i]['top'])
-    if(i<len(data)-"""+str(num_cols+1)+"""):
+def top_rule(data):
+    top_thresh = 4
+    passed = 0
+    for i in range(0,len(data),"""+str(num_cols)+"""):
+        top = int(data[i]['top'])
+        if(i<len(data)-"""+str(num_cols+1)+"""):
 """
 
 	#autogenerate code to remove groups that are too small
@@ -117,37 +118,37 @@ for i in range(0,len(data),"""+str(num_cols)+"""):
 		small_if +="""(top + top_thresh)>int(data[i+"""+str(i)+"""]['top']) and """
 	small_if = " ".join(small_if.split()[0:-1])
 	small_if+="): #remove groups smaller than # columns\n"
-	small_if+= """            pass\n"""
-	small_if+= """        else:\n"""
-	small_if+="""            print("Removing...(group too small")\n"""
-	small_if+="""            print(data[i])\n"""
-	small_if+="""            print(data[i]['top'])\n"""
-	for i in range(1,num_cols-1):
-		small_if+="""            print(data[i+"""+str(i)+"""]['top'])\n"""
-	small_if+="""            passed = 1\n"""
-	small_if+="""            del data[i]\n"""
-	small_if+="""            return data, passed\n"""
-	python+=("        " + small_if)
+	small_if+= """                 pass\n"""
+	small_if+= """            else:\n"""
+	small_if+="""                print("Removing...(group too small")\n"""
+	small_if+="""                print(data[i])\n"""
+	small_if+="""                print(data[i]['top'])\n"""
+	for i in range(1,num_cols):
+		small_if+="""                print(data[i+"""+str(i)+"""]['top'])\n"""
+	small_if+="""                passed = 1\n"""
+	small_if+="""                del data[i]\n"""
+	small_if+="""                return data, passed\n"""
+	python+=("            " + small_if)
 	
 	large_if = """if("""
-	for i in range(1,num_cols+1):
-		large_if +="""top<int(data[i+"""+str(i)+"""]['top']) and """
-	large_if = " ".join(large_if.split()[0:-1])
+	for i in range(1,num_cols):
+		large_if +="""top<int(data[i+"""+str(i)+"""]['top']) + top_thresh and """
+	large_if += """top + top_thresh<int(data[i+"""+str(num_cols)+"""]['top'])"""
 	large_if+="): #remove groups larger than # columns\n"
-	large_if+="""            continue\n"""
-	large_if+="""        else:"""
-	large_if+="""
-            print("Removing... (group too large)")
-            remove_list = []
-            for j in range(0,len(data)):
-                if((int(data[j]['top'])<=top+top_thresh) and (int(data[j]['top'])>=top-top_thresh)):
-                    remove_list.append(data[j])
-                    print(data[j])
-            data = [k for k in data if k['text'] not in [k['text'] for k in remove_list]]
-            print("_________________________________")
-            passed = 1
-            return data, passed\n"""
-	python+=("        " + large_if)
+	large_if+="""                continue\n"""
+	large_if+="""            else:"""
+	large_if+="""    
+                print("Removing... (group too large)")
+                remove_list = []
+                for j in range(0,len(data)):
+                    if((int(data[j]['top'])<=top+top_thresh) and (int(data[j]['top'])>=top-top_thresh)):
+                        remove_list.append(data[j])
+                        print(data[j])
+                data = [k for k in data if k['text'] not in [k['text'] for k in remove_list]]
+                print("_________________________________")
+                passed = 1
+                return data, passed\n"""
+	python+=("            " + large_if)
 
 
 	final_if = """elif(i<len(data)-"""+str(num_cols)+"""):\n"""
@@ -156,28 +157,25 @@ for i in range(0,len(data),"""+str(num_cols)+"""):
 		temp_if +="""(top + top_thresh)>int(data[i+"""+str(i)+"""]['top']) and """
 	temp_if = " ".join(temp_if.split()[0:-1])
 	temp_if+="): #special case for removing groups from the end that are too small\n"
-	final_if+=("        " + temp_if)
-	final_if+="""            pass\n"""
-	final_if+="""        else:"""
+	final_if+=("            " + temp_if)
+	final_if+="""                pass\n"""
+	final_if+="""            else:"""
 	final_if+="""
-            print("Removing...(group too small)")
-            print(data[i])
-            print("_________________________________")
-            passed = 1
-            del data[i]
-            return data, passed
+                print("Removing...(group too small)")
+                print(data[i])
+                print("_________________________________")
+                passed = 1
+                del data[i]
+                return data, passed
+    return data, passed
 	"""
 
-	python+=("    " + final_if)
-
+	python+=("        " + final_if)
 	print(python)
-
-	exec(python)
-
-def implement_top_rule(data,num_cols):
+	exec(python, globals())
 	for i in range(0,69):
 		print("Length input data: " + str(len(data)))
-		data, passed = top_rule(data,num_cols)
+		data, passed = top_rule(data)
 		if(passed==0):
 			print("Passed top on run " + str(i) + "? --> " + str(passed))
 			print("Time taken: " + str(time.time()-time_a) + " seconds!")
@@ -205,7 +203,7 @@ def group_by_columns(image_lines, num_cols):
 		create table right_side as
 		select cast(left as 'decimal') as left, text, cast(top as 'decimal') as top
 		from image_table
-		where text not in ('$',' ')
+		where text not in ('$',' ', 'S$')
 		and cast(left as 'decimal')>(select max(cast(left as 'decimal'))/2 from image_table)
 		order by cast(top as 'decimal') asc, cast(left as 'decimal') asc;"""
 	run_SQL(SQL, commit_indic='y')
@@ -274,7 +272,6 @@ def group_by_columns(image_lines, num_cols):
 				data[i]['variable'] = image_lines[j]['variable']
 				data[i]['line_num'] = str(j)
 				data[i]['page_num'] = image_lines[j]['page_num']
-				data[i]['company'] = image_lines[j]['company']
 
 	data = [i for i in data if 'variable' in i.keys()]
 
@@ -340,12 +337,12 @@ def remove_lines(filename):
 			(x_start, y_start, x_end, y_end) = [int(i) for i in ln[0]]
 			if(abs(abs(float(y_start))-abs(float(y_end)))<5):
 				#print("x_start: " + str(x_start) + "  " + "x_end: " + str(x_end) + "  y_start: " + str(y_start) + "  " + "y_end: " + str(y_end))
-				line(gry, (x_start-(x_end-x_start), y_start), (x_end, y_end), (255, 255, 255), thickness=4)
+				line(gry, (x_start-(x_end-x_start), y_start+2), (x_end, y_end+2), (255, 255, 255), thickness=4)
 	thr = adaptiveThreshold(gry, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 21, 23)
 	filename = str(os.path.abspath(os.path.dirname(__file__))+"{}.png").format(os.getpid())
 	imwrite(filename, gry)
 	time_a = time.time()
-	image_data = image_to_data(thr, output_type = Output.DICT)
+	image_data = image_to_data(filename, output_type = Output.DICT)
 	print("Time taken image_to_data: " + str(time.time()-time_a) + " seconds!")
 	return image_data, filename
 
@@ -424,11 +421,11 @@ def scrape_financials(full_image_data):
 				break
 		print("___ Time taken to sort image lines ___: " + str(time.time()-time_a) + " seconds!")
 
-		#for i in image_lines:
-		#	for j in i:
-		#		if j['text']=='(G44)':
-		#			print("SWIGGA!")
-		#			print(i)
+		for i in image_lines:
+			for j in i:
+				if "combinations" in j['text']:
+					print("SWIGGA!")
+					print(i)
 
 		# sort lines left to right
 		time_a = time.time()
@@ -503,6 +500,12 @@ full_image_data = []
 for image in images:
 	time_a = time.time()
 	image_data, filename = remove_lines(filename)
+	#image = imread(filename)
+	#imshow('Results',image)
+	#waitKey(0)
+	#show_rectangles(image_data, filename)
+	#import sys
+	#sys.exit(0)
 	print("Time taken remove_lines: " + str(time.time()-time_a) + " seconds!")
 	time_a = time.time()
 	save_image_data(image_data) #put image data into SQL
