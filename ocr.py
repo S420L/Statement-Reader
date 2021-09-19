@@ -112,8 +112,8 @@ def implement_left_rule(data):
 	return data
 
 def isolate_whitespace(data, num_rows, isolated):
-	count = 0
 	for i in range(0,len(data)):
+		count = 0
 		surface_1 = [int(data[i]['left']), int(data[i]['left']+int(data[i]['width']))]
 		for j in range(0,len(data)):
 			if(data[i]['text']!=data[j]['text']):
@@ -121,13 +121,13 @@ def isolate_whitespace(data, num_rows, isolated):
 				if((surface_2[0]>=surface_1[0] and surface_2[0]<=surface_1[1]) or (surface_1[0]>=surface_2[0] and surface_1[0]<=surface_2[1])):
 					count+=1
 					continue
-		if(count<=(num_rows-(num_rows/2))):
+		if(count<=(num_rows-((3*num_rows)/4))):
 			isolated.append(data[i])
 			print("________"+str(data[i]['text'])+"____________")
 			print(surface_1)
 			print(count)
 			print(num_rows)
-			print(num_rows-(num_rows/2))
+			print(num_rows-((3*num_rows)/4))
 			del data[i]
 			return data, 1, isolated
 	return data, 0, isolated
@@ -548,9 +548,11 @@ def scrape_financials(full_image_data):
 
 Tk().withdraw()
 #filename = askopenfilename()
-#filename = os.path.abspath(os.path.dirname( __file__ ))+'\\ca20ad42-8201-4cfe-af72-9965f25f53e9-2.ppm' #manual for testing
-filename = os.path.abspath(os.path.dirname( __file__ ))+'\ca20ad42-8201-4cfe-af72-9965f25f53e9-4.ppm' #manual for testing
 #filename = os.path.abspath(os.path.dirname( __file__ ))+'\ca20ad42-8201-4cfe-af72-9965f25f53e9-1.ppm' #manual for testing
+#filename = os.path.abspath(os.path.dirname( __file__ ))+'\\ca20ad42-8201-4cfe-af72-9965f25f53e9-2.ppm' #manual for testing
+#filename = os.path.abspath(os.path.dirname( __file__ ))+'\\ca20ad42-8201-4cfe-af72-9965f25f53e9-3.ppm' #manual for testing
+filename = os.path.abspath(os.path.dirname( __file__ ))+'\ca20ad42-8201-4cfe-af72-9965f25f53e9-4.ppm' #manual for testing
+
 
 #if it's a PDF, convert to image first
 start_time = time.time()
