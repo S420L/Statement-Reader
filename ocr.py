@@ -1,27 +1,36 @@
 import os
 import re
-from sqlite3.dbapi2 import SQLITE_ALTER_TABLE
-import time
 import tempfile
+import time
+import numpy as np
+import cv2
+from sqlite3.dbapi2 import SQLITE_ALTER_TABLE
 from tkinter import Tk
 from pdf2image import convert_from_path
-from pytesseract import image_to_data, Output
-from tricks import (dict_to_sqlite, list_to_dict, most_frequent, run_SQL, 
-					send_to_excel)
-from cv2 import (ADAPTIVE_THRESH_MEAN_C, COLOR_BGR2GRAY, THRESH_BINARY,
-                 adaptiveThreshold, cvtColor, imread, imshow, imwrite, line,
-                 rectangle, waitKey, ximgproc)
+from pytesseract import Output, image_to_data
 
-def show_rectangles(image_data, filename):
+from tricks import (dict_to_sqlite, list_to_dict, most_frequent, run_SQL,
+                    send_to_excel)
+
+
+def show_boxes(image_data, filename):
 	'''function for showing borders around words (visualize the data from image_to_data)
 	'''
-	image = imread(filename)
+	image = cv2.imread(filename)
 	for i in range(0,len(image_data['line_num'])):
 		(x, y, w, h) = (image_data['left'][i], image_data['top'][i], image_data['width'][i], image_data['height'][i])
-		rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
-	imshow('Results',image)
-	waitKey(0)
+		cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+	#cv2.imshow('Results',image)
+	#cv2.waitKey(0)
+	boxes = str(os.path.abspath(os.path.dirname( __file__ ))+"\{}.png").format(os.getpid()+1)
+	cv2.imwrite(boxes, image)
 	return
+
+#filename = os.path.abspath(os.path.dirname( __file__ ))+'\ca20ad42-8201-4cfe-af72-9965f25f53e9-4.ppm'
+#image_data = image_to_data(filename, output_type = Output.DICT)
+#show_boxes(image_data, filename)
+#import sys
+#sys.exit(0)
 
 def pdf_to_image(filename):
 	'''OCR only works on images, so convert all pdfs to a list of images
@@ -80,7 +89,9 @@ def left_rule(data):
 				continue
 		elif((left > (int(data[i-1]['left']) + left_thresh) and int(data[i+1]['left'])>(left+left_thresh))):
 			print("Removing...(too much space above and below)")
+			print(data[i-1]['left'])
 			print(data[i])
+			print(data[i+1]['left'])
 			print("_________________________________")
 			passed = 1
 			del data[i]
@@ -90,6 +101,7 @@ def left_rule(data):
 
 	return data, passed
 
+time_a = time.time()
 def implement_left_rule(data):
 	for i in range(0,69):	
 		data, passed = left_rule(data)
@@ -99,9 +111,32 @@ def implement_left_rule(data):
 			break
 	return data
 
-def implement_top_rule(data,num_cols):
+def isolate_whitespace(data, num_rows, isolated):
+	count = 0
+	for i in range(0,len(data)):
+		surface_1 = [int(data[i]['left']), int(data[i]['left']+int(data[i]['width']))]
+		for j in range(0,len(data)):
+			if(data[i]['text']!=data[j]['text']):
+				surface_2 = [int(data[j]['left']), int(data[j]['left']+int(data[j]['width']))]
+				if((surface_2[0]>=surface_1[0] and surface_2[0]<=surface_1[1]) or (surface_1[0]>=surface_2[0] and surface_1[0]<=surface_2[1])):
+					count+=1
+					continue
+		if(count<=(num_rows-(num_rows/2))):
+			isolated.append(data[i])
+			print("________"+str(data[i]['text'])+"____________")
+			print(surface_1)
+			print(count)
+			print(num_rows)
+			print(num_rows-(num_rows/2))
+			del data[i]
+			return data, 1, isolated
+	return data, 0, isolated
+	
+		
+def implement_top_rule(data, num_cols, num_rows):
 	'''Iterative algorithm:
 		-- force table structure on the data, putting numbers into groups of size N
+		-- autogenerate the python to implement logic
 	'''
 	python = """
 def top_rule(data):
@@ -124,7 +159,7 @@ def top_rule(data):
 	small_if+="""                print(data[i])\n"""
 	small_if+="""                print(data[i]['top'])\n"""
 	for i in range(1,num_cols):
-		small_if+="""                print(data[i+"""+str(i)+"""]['top'])\n"""
+		small_if+="""                print(data[i+"""+str(i)+"""])\n"""
 	small_if+="""                passed = 1\n"""
 	small_if+="""                del data[i]\n"""
 	small_if+="""                return data, passed\n"""
@@ -173,6 +208,8 @@ def top_rule(data):
 	python+=("        " + final_if)
 	print(python)
 	exec(python, globals())
+
+	#group the numbers
 	for i in range(0,69):
 		print("Length input data: " + str(len(data)))
 		data, passed = top_rule(data)
@@ -180,6 +217,19 @@ def top_rule(data):
 			print("Passed top on run " + str(i) + "? --> " + str(passed))
 			print("Time taken: " + str(time.time()-time_a) + " seconds!")
 			break
+	
+	#isolate data with whitespace above and below
+	isolated = []
+	for i in range(0,69):
+		print("Length input data: " + str(len(data)))
+		data, passed, isolated = isolate_whitespace(data, num_rows, isolated)
+		if(passed==0):
+			print("Passed isolate_whitespace on run #" + str(i) + "? --> " + str(passed))
+			print("Time taken: " + str(time.time()-time_a) + " seconds!")
+			break
+
+	print("ISOLATED MY SWIGGA")
+	print(isolated)
 	return data
 
 def detect_gaps(data):
@@ -194,68 +244,76 @@ def detect_gaps(data):
 				results.append(int((int(lefts[i+1])-int(lefts[i]))/2 + int(lefts[i])))
 	return sorted(results, key = lambda num: num, reverse=False)
 
-def group_by_columns(image_lines, num_cols):
+def group_by_columns(image_lines, num_cols, num_rows):
 	'''get table from right side of the page
 	'''
 	SQL = """drop table if exists right_side;"""
 	run_SQL(SQL, commit_indic='y')
 	SQL = """
 		create table right_side as
-		select cast(left as 'decimal') as left, text, cast(top as 'decimal') as top
+		select cast(left as 'decimal') as left, text, cast(top as 'decimal') as top, cast(width as 'decimal') as width
 		from image_table
-		where text not in ('$',' ', 'S$')
+		where text not in ('$',' ', 'S$','§')
 		and cast(left as 'decimal')>(select max(cast(left as 'decimal'))/2 from image_table)
 		order by cast(top as 'decimal') asc, cast(left as 'decimal') asc;"""
 	run_SQL(SQL, commit_indic='y')
 	time_a  = time.time()
-	SQL = """select distinct text, left, top from right_side order by cast(top as 'decimal') asc;""" #all data on the right half of the page, ordered top to bottom
+	SQL = """select distinct text, left, top, width from right_side order by cast(top as 'decimal') asc;""" #all data on the right half of the page, ordered top to bottom
 	data = run_SQL(SQL)
-	data = implement_top_rule(data,num_cols)
+	data = implement_top_rule(data, num_cols, num_rows)
 	print("Time taken implement_top_rule: " + str(time.time()-time_a) + " seconds!")
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"right_side_1")
 
 	#process data left to right
-	time_a = time.time()
-	SQL = """select distinct text, left, top from right_side_1 order by cast(left as 'decimal') asc;"""
-	data = run_SQL(SQL)
-	data = implement_left_rule(data)
-	print("Time taken implement_left_rule: " + str(time.time()-time_a) + " seconds!")
-	data_dict = list_to_dict(data)
-	dict_to_sqlite(data_dict,"right_side_2")
+	#time_a = time.time()
+	#SQL = """select distinct text, left, top from right_side_1 order by cast(left as 'decimal') asc;"""
+	#data = run_SQL(SQL)
+	#data = implement_left_rule(data)
+	#print("Time taken implement_left_rule: " + str(time.time()-time_a) + " seconds!")
+	#data_dict = list_to_dict(data)
+	#dict_to_sqlite(data_dict,"right_side_2")
 
-	time_a = time.time()
-	SQL = """select distinct text, left, top from right_side_2 order by cast(left as 'decimal') asc;"""
-	data = run_SQL(SQL)
-	results = [0] + detect_gaps(data)
-	print("Time taken detect_gaps: " + str(time.time()-time_a) + " seconds!")
+	#time_a = time.time()
+	#SQL = """select distinct text, left, top from right_side_2 order by cast(left as 'decimal') asc;"""
+	#data = run_SQL(SQL)
+	#results = [0] + detect_gaps(data)
+	#rint("Column boundaries: ")
+	#print(results)
+	#print("Time taken detect_gaps: " + str(time.time()-time_a) + " seconds!")
 
-	SQL = """drop table if exists right_side_3;"""
-	run_SQL(SQL, commit_indic='y')
-	SQL = """
-		create table right_side_3 as
-		select distinct text, left, top, case
-		"""
-	counter = 1
-	for i in range(0,len(results)-1):
-		SQL += " when cast(left as 'decimal') between " + str(results[i]) + " and " + str(results[i+1]) + " then 'group_"+str(counter) + "'"
-		counter+=1
-	SQL += " when cast(left as 'decimal')>=" + str(results[-1]) + " then 'group_"+str(counter) + "'"
-	SQL += """ end as groupies
-		from right_side_2;
-		"""
-	print(SQL)
-	run_SQL(SQL, commit_indic='y')
+	#SQL = """drop table if exists right_side_3;"""
+	#run_SQL(SQL, commit_indic='y')
+	#SQL = """
+	#	create table right_side_3 as
+	#	select distinct text, left, top, case
+	#	"""
+	#counter = 1
+	#for i in range(0,len(results)-1):
+	#	SQL += " when cast(left as 'decimal') between " + str(results[i]) + " and " + str(results[i+1]) + " then 'group_"+str(counter) + "'"
+	#	counter+=1
+	#SQL += " when cast(left as 'decimal')>=" + str(results[-1]) + " then 'group_"+str(counter) + "'"
+	#SQL += """ end as groupies
+	#	from right_side_2;
+	#	"""
+	#print(SQL)
+	#run_SQL(SQL, commit_indic='y')
 
-	data = run_SQL("select * from right_side_3 order by cast(top as 'decimal') asc;")
-	for i in range(0,len(data)-2,3):
+	data = run_SQL("select * from right_side_1 order by cast(top as 'decimal') asc;")
+	print(num_cols)
+	python = ""
+	for i in range(0,len(data)-num_cols,num_cols):
 		top = str(data[i]['top'])
-		data[i+1]['top'] = top
-		data[i+2]['top'] = top
+		for j in range(0,num_cols):
+			data[i+j]['top'] = top
+		
 	SQL = """drop table if exists right_side_4;"""
 	run_SQL(SQL, commit_indic='y')
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"right_side_4")
+
+	import sys
+	sys.exit(0)
 
 	data = run_SQL("select * from right_side_4 order by cast(top as 'decimal') asc, cast(left as 'decimal');")
 	num_groups = int(run_SQL("select max(groupies) from right_side_4;")[0]['max(groupies)'].replace("group_","").strip())
@@ -329,18 +387,23 @@ def save_image_data(image_data):
 def remove_lines(filename):
 	'''get rid of horizontal lines in the financial statement (interfears with OCR)
 	'''
-	img = imread(filename)
-	gry = cvtColor(img, COLOR_BGR2GRAY)
-	lns = ximgproc.createFastLineDetector(length_threshold=20).detect(gry) 
+	img = cv2.imread(filename)
+	img = cv2.resize(img, None, fx=1.2, fy=1.2, interpolation=cv2.INTER_CUBIC)
+	img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+	kernel = np.ones((1, 1), np.uint8)
+	img = cv2.dilate(img, kernel, iterations=1)
+	img = cv2.erode(img, kernel, iterations=1)
+	lns = cv2.ximgproc.createFastLineDetector(length_threshold=20).detect(img)
+	#img = cv2.threshold(cv2.medianBlur(img, 3), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
 	if lns is not None:
 		for ln in lns:
 			(x_start, y_start, x_end, y_end) = [int(i) for i in ln[0]]
 			if(abs(abs(float(y_start))-abs(float(y_end)))<5):
 				#print("x_start: " + str(x_start) + "  " + "x_end: " + str(x_end) + "  y_start: " + str(y_start) + "  " + "y_end: " + str(y_end))
-				line(gry, (x_start-(x_end-x_start), y_start+2), (x_end, y_end+2), (255, 255, 255), thickness=4)
-	thr = adaptiveThreshold(gry, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 21, 23)
-	filename = str(os.path.abspath(os.path.dirname(__file__))+"{}.png").format(os.getpid())
-	imwrite(filename, gry)
+				cv2.line(img, (x_start-(x_end-x_start), y_start+2), (x_end, y_end+2), (255, 255, 255), thickness=4)
+	#thr = adaptiveThreshold(gry, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 21, 1)
+	filename = str(os.path.abspath(os.path.dirname( __file__ ))+"\{}.png").format(os.getpid())
+	cv2.imwrite(filename, img)
 	time_a = time.time()
 	image_data = image_to_data(filename, output_type = Output.DICT)
 	print("Time taken image_to_data: " + str(time.time()-time_a) + " seconds!")
@@ -423,7 +486,7 @@ def scrape_financials(full_image_data):
 
 		for i in image_lines:
 			for j in i:
-				if "combinations" in j['text']:
+				if "2018" in j['text']:
 					print("SWIGGA!")
 					print(i)
 
@@ -449,13 +512,14 @@ def scrape_financials(full_image_data):
 					values.append(j)
 				else:
 					variable += " " + str(j)
-			image_lines[i]['variable'] = variable.replace("\"","")
+			image_lines[i]['variable'] = variable.replace("\"","").replace("§","")
 			image_lines[i]['values'] = values
 			
 		data_dict = {'rank': [],'variable': [], 'year': [], 'value': []}
 		num_cols = most_frequent([len(i['values']) for i in image_lines])
+		num_rows = len(image_lines)
 
-		group_by_columns(image_lines, num_cols)
+		group_by_columns(image_lines, num_cols, num_rows)
 
 		import sys
 		sys.exit(0)
@@ -484,8 +548,9 @@ def scrape_financials(full_image_data):
 
 Tk().withdraw()
 #filename = askopenfilename()
-#filename = os.path.abspath(os.path.dirname( __file__ ))+'\\9f9416d6-7507-4822-a10e-07cfdbce3157-2.ppm' #manual for testing
+#filename = os.path.abspath(os.path.dirname( __file__ ))+'\\ca20ad42-8201-4cfe-af72-9965f25f53e9-2.ppm' #manual for testing
 filename = os.path.abspath(os.path.dirname( __file__ ))+'\ca20ad42-8201-4cfe-af72-9965f25f53e9-4.ppm' #manual for testing
+#filename = os.path.abspath(os.path.dirname( __file__ ))+'\ca20ad42-8201-4cfe-af72-9965f25f53e9-1.ppm' #manual for testing
 
 #if it's a PDF, convert to image first
 start_time = time.time()
@@ -500,18 +565,16 @@ full_image_data = []
 for image in images:
 	time_a = time.time()
 	image_data, filename = remove_lines(filename)
-	#image = imread(filename)
-	#imshow('Results',image)
+	show_boxes(image_data, filename)
+	#image = cv2.imread(filename)
+	#cv2.imshow("blablabla", image)
 	#waitKey(0)
-	#show_rectangles(image_data, filename)
-	#import sys
-	#sys.exit(0)
 	print("Time taken remove_lines: " + str(time.time()-time_a) + " seconds!")
 	time_a = time.time()
 	save_image_data(image_data) #put image data into SQL
 	print("Time taken save_image_data: " + str(time.time()-time_a) + " seconds!")
 	full_image_data.append(image_data)
-	os.remove(filename)
+	#os.remove(filename)  
 
 scrape_financials(full_image_data)
 #group_by_columns()

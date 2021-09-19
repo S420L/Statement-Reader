@@ -97,3 +97,12 @@ def list_to_dict(data_list):
 		for j in keys:
 			data_dict[j].append(data_list[i][j])
 	return data_dict
+
+#Display image
+def display(img, frameName="OpenCV Image"):
+    h, w = img.shape[0:2]
+    neww = 800
+    newh = int(neww*(h/w))
+    img = resize(img, (neww, newh))
+    imshow(frameName, img)
+    waitKey(0)
