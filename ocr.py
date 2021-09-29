@@ -6,6 +6,7 @@ import numpy as np
 import cv2
 from sqlite3.dbapi2 import SQLITE_ALTER_TABLE
 from tkinter import Tk
+from tkinter import filedialog
 from pdf2image import convert_from_path
 from pytesseract import Output, image_to_data
 
@@ -152,9 +153,7 @@ def top_rule(data):
         top = int(data[i]['top'])
         if(i<len(data)-"""+str(num_cols+1)+"""):
 """
-
-	#autogenerate code to remove groups that are too small
-	small_if = """if("""
+	small_if = """if(""" #autogenerate code to remove groups that are too small
 	for i in range(1,num_cols):
 		small_if +="""(top + top_thresh)>int(data[i+"""+str(i)+"""]['top']) and """
 	small_if = " ".join(small_if.split()[0:-1])
@@ -190,8 +189,6 @@ def top_rule(data):
                 passed = 1
                 return data, passed\n"""
 	python+=("            " + large_if)
-
-
 	final_if = """elif(i<len(data)-"""+str(num_cols)+"""):\n"""
 	temp_if = """if("""
 	for i in range(1,num_cols):
@@ -210,12 +207,11 @@ def top_rule(data):
                 return data, passed
     return data, passed
 	"""
-
 	python+=("        " + final_if)
 	print(python)
 	exec(python, globals())
 
-	#group the numbers
+	#enforce that data fits the structure of length N rows
 	for i in range(0,69):
 		print("Length input data: " + str(len(data)))
 		data, passed = top_rule(data)
@@ -223,8 +219,8 @@ def top_rule(data):
 			print("Passed top on run " + str(i) + "? --> " + str(passed))
 			print("Time taken: " + str(time.time()-time_a) + " seconds!")
 			break
-	
-	#isolate data with whitespace above and below
+
+	#isolate data with too much whitespace above and below to be considered part of a column
 	isolated = []
 	for i in range(0,69):
 		print("Length input data: " + str(len(data)))
@@ -233,9 +229,18 @@ def top_rule(data):
 			print("Passed isolate_whitespace on run #" + str(i) + "? --> " + str(passed))
 			print("Time taken: " + str(time.time()-time_a) + " seconds!")
 			break
-
+	
 	print("ISOLATED MY SWIGGA")
 	print(isolated)
+
+	#enforce that data fits the structure of length N rows
+	for i in range(0,69):
+		print("Length input data: " + str(len(data)))
+		data, passed = top_rule(data)
+		if(passed==0):
+			print("Passed top on run " + str(i) + "? --> " + str(passed))
+			print("Time taken: " + str(time.time()-time_a) + " seconds!")
+			break
 	return data, isolated
 
 def detect_gaps(data):
@@ -284,6 +289,7 @@ def group_by_columns(image_lines, num_cols, num_rows):
 	data = run_SQL(SQL)
 	data, isolated = implement_top_rule(data, num_cols, num_rows)
 	print("Time taken implement_top_rule: " + str(time.time()-time_a) + " seconds!")
+	print(data)
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"right_side_1")
 
@@ -323,7 +329,7 @@ def group_by_columns(image_lines, num_cols, num_rows):
 
 	data = run_SQL("select * from right_side_2 order by cast(top as 'decimal') asc;")
 	print(num_cols)
-	for i in range(0,len(data)-num_cols,num_cols):
+	for i in range(0,len(data),num_cols):
 		top = str(data[i]['top'])
 		for j in range(0,num_cols):
 			data[i+j]['top'] = top
@@ -334,9 +340,12 @@ def group_by_columns(image_lines, num_cols, num_rows):
 	dict_to_sqlite(data_dict,"right_side_3")
 
 	#extract and assign columns
-	columns = get_column_names(isolated, num_cols)
-	print(columns)
 	data = run_SQL("select * from right_side_3 order by cast(top as 'decimal') asc, cast(left as 'decimal');")
+	columns = get_column_names(isolated, num_cols)
+	if(len(columns)==0):
+		columns = [i['text'] for i in data[0:num_cols]]
+		data = data[num_cols:]
+	print(columns)
 	for i in range(0,len(data),num_cols):
 		for j in range(0,num_cols):
 			data[i+j]['column'] = columns[j]
@@ -350,12 +359,24 @@ def group_by_columns(image_lines, num_cols, num_rows):
 				data[i]['page_num'] = image_lines[j]['page_num']
 
 	data = [i for i in data if 'variable' in i.keys()]
-
+	for i in range(0,len(data)):
+		data[i]['text'] = data[i]['text'].replace(",","").replace("..",".").replace(".,",".").replace(",.",".")
+	data = replace_dashes_new(data)
 	SQL = """drop table if exists right_side_4;"""
 	run_SQL(SQL, commit_indic='y')
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"right_side_4")
 
+
+	SQL = """drop table if exists right_side_5;"""
+	run_SQL(SQL, commit_indic='y')
+	SQL = """
+		create table right_side_5 as
+		select distinct variable, cast(replace(text,'—','-') as 'decimal') as value, column, cast(line_num as 'decimal') as line_num,
+		cast(left as 'decimal') as left, cast(top as 'decimal') as top, cast(page_num as 'decimal') as page_num, groupies
+		from right_side_4;
+		"""
+	run_SQL(SQL, commit_indic='y')
 
 def fix_image_lines(image_lines):
 	'''part 2 of algorithm, fix data structure to force Python line index to equal line_num
@@ -442,6 +463,20 @@ def replace_dashes(image_lines):
 					print(image_lines[i][j]['text'])
 	return image_lines
 
+def replace_dashes_new(data):
+	'''turn dashes into zeros, reposition dashes so that the "top" value isn't so different from other numbers
+	'''
+	for i in range(0,len(data)):
+		if(data[i]['text'].strip()==b'\xe2\x80\x94'.decode('utf-8')):
+			data[i]['text'] = str(0)
+			data[i]['top'] = float(data[i]['top']) - 10
+		elif(data[i]['text'].strip()[0]=="(" and data[i]['text'].strip()[-1]==")"):
+			if(data[i]['text'].replace("(","").replace(")","").replace("0.","").replace(".","").replace(",","").strip().isdigit()):
+				data[i]['text'] = str("—" + data[i]['text'][1:-1])
+			else:
+				print(data[i]['text'])
+	return data
+
 def scrape_financials(full_image_data):
 	'''scrapes financial data from chosen set of images
 	'''
@@ -451,6 +486,9 @@ def scrape_financials(full_image_data):
 	#apply table processing logic to each image
 	for page_num in range(0,len(full_image_data)):
 		image_data = full_image_data[page_num]
+		time_a = time.time()
+		save_image_data(image_data) #put image data into SQL
+		print("Time taken save_image_data: " + str(time.time()-time_a) + " seconds!")
 		time_a = time.time()
 		temp_data = {'text': [], 'top': [], 'left': [], 'line_num': []}
 		for i in range(0,len(image_data['text'])):
@@ -527,84 +565,64 @@ def scrape_financials(full_image_data):
 			image_lines[i]['variable'] = variable.replace("\"","").replace("§","")
 			image_lines[i]['values'] = values
 			
-		data_dict = {'rank': [],'variable': [], 'year': [], 'value': []}
 		num_cols = most_frequent([len(i['values']) for i in image_lines])
 		num_rows = len(image_lines)
-
+		print("num_cols:" + str(num_cols))
+		print("num_rows:" + str(num_rows))
+		#try:
 		group_by_columns(image_lines, num_cols, num_rows)
-
-		import sys
-		sys.exit(0)
-
-		for i in range(0,len(image_lines)):
-			if(len(image_lines[i]['values'])==num_years and image_lines[i]['variable']!=""):
-				for j in range(0,num_years):
-					data_dict['rank'].append(str(i))
-					data_dict['variable'].append(image_lines[i]['variable'].strip().lower())
-					data_dict['year'].append(str(2020-j))
-					data_dict['value'].append(image_lines[i]['values'][j])
-			elif(len(image_lines[i]['values'])==0 and image_lines[i]['variable']!=""):
-				data_dict['rank'].append(str(i))
-				data_dict['variable'].append(image_lines[i]['variable'].strip().lower())
-				data_dict['year'].append("HEADING")
-				data_dict['value'].append("HEADING")
-
 		print("Inputting scraped financial data...")
-		#[print(len(data_dict[i])) for i in data_dict.keys()]
-		dict_to_sqlite(data_dict, "financials_temp_1")
 		SQL = """
 		insert into financials
-		select * from financials_temp_1;
+		select * from right_side_5;
 		"""
 		run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
+		#except:
+		#	print("------- FAILED TO INPUT DATA FROM THIS SHEET --------")
 
 Tk().withdraw()
-#filename = askopenfilename()
+filename = filedialog.askopenfilename()
 #filename = os.path.abspath(os.path.dirname( __file__ ))+'\ca20ad42-8201-4cfe-af72-9965f25f53e9-1.ppm' #manual for testing
 #filename = os.path.abspath(os.path.dirname( __file__ ))+'\\ca20ad42-8201-4cfe-af72-9965f25f53e9-2.ppm' #manual for testing
-filename = os.path.abspath(os.path.dirname( __file__ ))+'\\ca20ad42-8201-4cfe-af72-9965f25f53e9-3.ppm' #manual for testing
-#filename = os.path.abspath(os.path.dirname( __file__ ))+'\ca20ad42-8201-4cfe-af72-9965f25f53e9-4.ppm' #manual for testing
-
+#filename = os.path.abspath(os.path.dirname( __file__ ))+'\\ca20ad42-8201-4cfe-af72-9965f25f53e9-3.ppm' #manual for testing
+#filename = os.path.abspath(os.path.dirname( __file__ ))+'\\7c30942b-b2a5-4713-9354-afd1f957545e-1.ppm' #manual for testing
 
 #if it's a PDF, convert to image first
 start_time = time.time()
 try:
-	images = pdf_to_image(filename) 
+	images = pdf_to_image(filename)
 	print("PDF")
+	print(images)
 except:
-	images = [filename]
 	print("image")
+	images = [filename]
 
 full_image_data = []
 for image in images:
 	time_a = time.time()
-	image_data, filename = remove_lines(filename)
-	show_boxes(image_data, filename)
+	image_data, image = remove_lines(image)
+	#show_boxes(image_data, filename)
 	#image = cv2.imread(filename)
 	#cv2.imshow("blablabla", image)
 	#waitKey(0)
 	print("Time taken remove_lines: " + str(time.time()-time_a) + " seconds!")
-	time_a = time.time()
-	save_image_data(image_data) #put image data into SQL
-	print("Time taken save_image_data: " + str(time.time()-time_a) + " seconds!")
 	full_image_data.append(image_data)
-	#os.remove(filename)  
+	os.remove(image)  
 
 scrape_financials(full_image_data)
-#group_by_columns()
 
 def output_to_excel():
 	'''transform most recently scraped data into traditional spread format
 	'''
 	SQL = """
 		select * from (
-		select distinct rank, variable, sum(case
-		when year=2020 then value end) as this_year, sum(case 
-		when year=2019 then value end) as last_year, sum(case
-		when year=2018 then value end) as year_before, count(*) as total
-		from financials
-		group by rank, variable
-		order by cast(rank as 'decimal'))
+		select distinct page_num, line_num, variable, sum(case
+		when column=2020 then value end) as this_year, sum(case 
+		when column=2019 then value end) as last_year, sum(case
+		when column=2018 then value end) as year_before, count(*) as total
+		from right_side_5
+		group by page_num, line_num, variable
+		order by page_num, line_num)
 		where total<=3;
 		"""
 	data = run_SQL(SQL, database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
@@ -613,7 +631,7 @@ def output_to_excel():
 
 	send_to_excel(os.path.dirname(__file__),data,"Financial Statement Output",clear_indic='n')
 
-#output_to_excel()
+output_to_excel()
 
 print("finished running in: " + str(time.time()-start_time) + " seconds")
 
