@@ -7,12 +7,11 @@ import cv2
 from sqlite3.dbapi2 import SQLITE_ALTER_TABLE
 from tkinter import Tk
 from tkinter import filedialog
+from difflib import SequenceMatcher
 from pdf2image import convert_from_path
 from pytesseract import Output, image_to_data
-
 from tricks import (dict_to_sqlite, list_to_dict, most_frequent, run_SQL,
                     send_to_excel)
-
 
 def show_boxes(image_data, filename):
 	'''function for showing borders around words (visualize the data from image_to_data)
@@ -21,10 +20,10 @@ def show_boxes(image_data, filename):
 	for i in range(0,len(image_data['line_num'])):
 		(x, y, w, h) = (image_data['left'][i], image_data['top'][i], image_data['width'][i], image_data['height'][i])
 		cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
-	#cv2.imshow('Results',image)
-	#cv2.waitKey(0)
-	boxes = str(os.path.abspath(os.path.dirname( __file__ ))+"\{}.png").format(os.getpid()+1)
-	cv2.imwrite(boxes, image)
+	cv2.imshow('Results',image)
+	cv2.waitKey(0)
+	#boxes = str(os.path.abspath(os.path.dirname( __file__ ))+"\{}.png").format(os.getpid()+1)
+	#cv2.imwrite(boxes, image)
 	return
 
 #filename = os.path.abspath(os.path.dirname( __file__ ))+'\ca20ad42-8201-4cfe-af72-9965f25f53e9-4.ppm'
@@ -32,6 +31,7 @@ def show_boxes(image_data, filename):
 #show_boxes(image_data, filename)
 #import sys
 #sys.exit(0)
+#---------------------- UNCOMMENT THIS TO SEE BOXES ------------------------------#
 
 def pdf_to_image(filename):
 	'''OCR only works on images, so convert all pdfs to a list of images
@@ -115,10 +115,10 @@ def implement_left_rule(data):
 def isolate_whitespace(data, num_rows, isolated):
 	for i in range(0,len(data)):
 		count = 0
-		surface_1 = [int(data[i]['left']), int(data[i]['left']+int(data[i]['width']))]
+		surface_1 = [int(data[i]['left']), int(data[i]['left'])+int(data[i]['width'])]
 		for j in range(0,len(data)):
 			if(data[i]['text']!=data[j]['text']):
-				surface_2 = [int(data[j]['left']), int(data[j]['left']+int(data[j]['width']))]
+				surface_2 = [int(data[j]['left']), int(data[j]['left'])+int(data[j]['width'])]
 				if((surface_2[0]>=surface_1[0] and surface_2[0]<=surface_1[1]) or (surface_1[0]>=surface_2[0] and surface_1[0]<=surface_2[1])):
 					count+=1
 					continue
@@ -131,12 +131,6 @@ def isolate_whitespace(data, num_rows, isolated):
 			print(num_rows-((3*num_rows)/4))
 			del data[i]
 			return data, 1, isolated
-		if(data[i]['text']=='balance'):
-			print("________"+str(data[i]['text'])+"____________")
-			print(surface_1)
-			print(count)
-			print(num_rows)
-			print(num_rows-((3*num_rows)/4))
 	return data, 0, isolated
 	
 		
@@ -184,7 +178,7 @@ def top_rule(data):
                     if((int(data[j]['top'])<=top+top_thresh) and (int(data[j]['top'])>=top-top_thresh)):
                         remove_list.append(data[j])
                         print(data[j])
-                data = [k for k in data if k['text'] not in [k['text'] for k in remove_list]]
+                data = [k for k in data if str(k['text']+k['top']) not in [str(k['text']+k['top']) for k in remove_list]]
                 print("_________________________________")
                 passed = 1
                 return data, passed\n"""
@@ -208,7 +202,7 @@ def top_rule(data):
     return data, passed
 	"""
 	python+=("        " + final_if)
-	print(python)
+	#print(python)
 	exec(python, globals())
 
 	#enforce that data fits the structure of length N rows
@@ -230,8 +224,11 @@ def top_rule(data):
 			print("Time taken: " + str(time.time()-time_a) + " seconds!")
 			break
 	
+	isolated = sorted(isolated, key = lambda row: int(row['top']), reverse=False)
 	print("ISOLATED MY SWIGGA")
 	print(isolated)
+	print("DATA MY SWIGGA")
+	print(data[0:5])
 
 	#enforce that data fits the structure of length N rows
 	for i in range(0,69):
@@ -255,25 +252,29 @@ def detect_gaps(data):
 				results.append(int((int(lefts[i+1])-int(lefts[i]))/2 + int(lefts[i])))
 	return sorted(results, key = lambda num: num, reverse=False)
 
-def get_column_names(data, num_cols):
+def get_column_names(data, num_cols, high_top):
 	left_thresh = 150
 	for i in data:
-		top = int(i['top'])
-		left = int(i['left'])
-		row = [i]
-		for j in data:
-			if(i['text']!=j['text']):
-				if(top==int(j['top']) and (left+left_thresh)<int(j['left'])):
-					row.append(j)
-					left = int(j['left'])
-		if len(row)==num_cols:
-			columns = [k['text'].strip() for k in row]
-			return columns
+		if(int(i['top'])<high_top):
+			top = int(i['top'])
+			left = int(i['left'])
+			row = [i]
+			for j in data:
+				if(int(j['top'])<high_top):
+					if(i['text']!=j['text']):
+						if(top==int(j['top']) and (left+left_thresh)<int(j['left'])):
+							row.append(j)
+							left = int(j['left'])
+			if len(row)==num_cols:
+				columns = [k['text'].strip() for k in row]
+				return columns
 	return []
 
 def group_by_columns(image_lines, num_cols, num_rows):
 	'''get table from right side of the page
 	'''
+
+	# get right 3/4 of data from page
 	SQL = """drop table if exists right_side;"""
 	run_SQL(SQL, commit_indic='y')
 	SQL = """
@@ -281,39 +282,40 @@ def group_by_columns(image_lines, num_cols, num_rows):
 		select cast(left as 'decimal') as left, text, cast(top as 'decimal') as top, cast(width as 'decimal') as width
 		from image_table
 		where text not in ('$',' ', 'S$','§')
-		and cast(left as 'decimal')>(select max(cast(left as 'decimal'))/2 from image_table)
+		and cast(left as 'decimal')>(select max(cast(left as 'decimal'))/4 from image_table)
 		order by cast(top as 'decimal') asc, cast(left as 'decimal') asc;"""
 	run_SQL(SQL, commit_indic='y')
-	time_a  = time.time()
-	SQL = """select distinct text, left, top, width from right_side order by cast(top as 'decimal') asc;""" #all data on the right half of the page, ordered top to bottom
+
+	# look at data left to right and remove stuff that doesn't appear to line up with a column
+	time_a = time.time()
+	SQL = """select distinct text, left, top, width from right_side order by cast(left as 'decimal') asc;"""
 	data = run_SQL(SQL)
-	data, isolated = implement_top_rule(data, num_cols, num_rows)
-	print("Time taken implement_top_rule: " + str(time.time()-time_a) + " seconds!")
-	print(data)
+	data = implement_left_rule(data)
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"right_side_1")
+	print("Time taken implement_left_rule: " + str(time.time()-time_a) + " seconds!")
 
-	#process data left to right
-	#time_a = time.time()
-	#SQL = """select distinct text, left, top from right_side_1 order by cast(left as 'decimal') asc;"""
-	#data = run_SQL(SQL)
-	#data = implement_left_rule(data)
-	#print("Time taken implement_left_rule: " + str(time.time()-time_a) + " seconds!")
-	#data_dict = list_to_dict(data)
-	#dict_to_sqlite(data_dict,"right_side_2")
+	# look at data top to bottom and group into rows of data
+	time_a  = time.time()
+	SQL = """select distinct text, left, top, width from right_side_1 order by cast(top as 'decimal') asc;"""
+	data = run_SQL(SQL)
+	data, isolated = implement_top_rule(data, num_cols, num_rows)
+	print(data)
+	data_dict = list_to_dict(data)
+	dict_to_sqlite(data_dict,"right_side_2")
+	print("Time taken implement_top_rule: " + str(time.time()-time_a) + " seconds!")
 
+	# define column boundaries for writing SQL case to label column number
 	time_a = time.time()
-	SQL = """select distinct text, left, top from right_side_1 order by cast(left as 'decimal') asc;"""
+	SQL = """select distinct text, left, top from right_side_2 order by cast(left as 'decimal') asc;"""
 	data = run_SQL(SQL)
 	results = [0] + detect_gaps(data)
 	print("Column boundaries: ")
 	print(results)
-	print("Time taken detect_gaps: " + str(time.time()-time_a) + " seconds!")
-
-	SQL = """drop table if exists right_side_2;"""
+	SQL = """drop table if exists right_side_3;"""
 	run_SQL(SQL, commit_indic='y')
 	SQL = """
-		create table right_side_2 as
+		create table right_side_3 as
 		select distinct text, left, top, case
 		"""
 	counter = 1
@@ -321,27 +323,30 @@ def group_by_columns(image_lines, num_cols, num_rows):
 		SQL += " when cast(left as 'decimal') between " + str(results[i]) + " and " + str(results[i+1]) + " then 'group_"+str(counter) + "'"
 		counter+=1
 	SQL += " when cast(left as 'decimal')>=" + str(results[-1]) + " then 'group_"+str(counter) + "'"
-	SQL += """ end as groupies
-		from right_side_1;
+	SQL += """ end as col_num
+		from right_side_2;
 		"""
 	print(SQL)
 	run_SQL(SQL, commit_indic='y')
 
-	data = run_SQL("select * from right_side_2 order by cast(top as 'decimal') asc;")
+	# make sure that top value is normalized for stuff on the same line
+	data = run_SQL("select * from right_side_3 order by cast(top as 'decimal') asc;")
 	print(num_cols)
 	for i in range(0,len(data),num_cols):
 		top = str(data[i]['top'])
 		for j in range(0,num_cols):
 			data[i+j]['top'] = top
-		
-	SQL = """drop table if exists right_side_3;"""
+	SQL = """drop table if exists right_side_4;"""
 	run_SQL(SQL, commit_indic='y')
 	data_dict = list_to_dict(data)
-	dict_to_sqlite(data_dict,"right_side_3")
+	dict_to_sqlite(data_dict,"right_side_4")
 
-	#extract and assign columns
-	data = run_SQL("select * from right_side_3 order by cast(top as 'decimal') asc, cast(left as 'decimal');")
-	columns = get_column_names(isolated, num_cols)
+	# extract names of columns from page data, only consider those in top quarter of data (header must be near or at the top)
+	data = run_SQL("select * from right_side_4 order by cast(top as 'decimal') asc, cast(left as 'decimal');")
+	high_top = [i['top'] for i in sorted(data, key=lambda row: int(row['top']))]
+	high_top = high_top[int(len(high_top)/4)]
+	print(high_top)
+	columns = get_column_names(isolated, num_cols, int(high_top))
 	if(len(columns)==0):
 		columns = [i['text'] for i in data[0:num_cols]]
 		data = data[num_cols:]
@@ -362,19 +367,19 @@ def group_by_columns(image_lines, num_cols, num_rows):
 	for i in range(0,len(data)):
 		data[i]['text'] = data[i]['text'].replace(",","").replace("..",".").replace(".,",".").replace(",.",".")
 	data = replace_dashes_new(data)
-	SQL = """drop table if exists right_side_4;"""
-	run_SQL(SQL, commit_indic='y')
-	data_dict = list_to_dict(data)
-	dict_to_sqlite(data_dict,"right_side_4")
-
-
 	SQL = """drop table if exists right_side_5;"""
 	run_SQL(SQL, commit_indic='y')
+	data_dict = list_to_dict(data)
+	dict_to_sqlite(data_dict,"right_side_5")
+
+
+	SQL = """drop table if exists right_side_6;"""
+	run_SQL(SQL, commit_indic='y')
 	SQL = """
-		create table right_side_5 as
+		create table right_side_6 as
 		select distinct variable, cast(replace(text,'—','-') as 'decimal') as value, column, cast(line_num as 'decimal') as line_num,
-		cast(left as 'decimal') as left, cast(top as 'decimal') as top, cast(page_num as 'decimal') as page_num, groupies
-		from right_side_4;
+		cast(left as 'decimal') as left, cast(top as 'decimal') as top, cast(page_num as 'decimal') as page_num, col_num
+		from right_side_5;
 		"""
 	run_SQL(SQL, commit_indic='y')
 
@@ -477,6 +482,55 @@ def replace_dashes_new(data):
 				print(data[i]['text'])
 	return data
 
+def detect_dates(data, num_cols):
+	calendar_months = ['january','february','march','april','may','june','july','august','september','october','november','december']
+	data = sorted(data, key=lambda row: int(row['top']))
+	top_thresh=4
+	for i in range(1,len(data)):
+		if(int(data[i]['top'])<int(data[i-1]['top'])+top_thresh):
+			data[i]['top'] = data[i-1]['top']
+	data = sorted(data, key=lambda row: (int(row['top']), int(row['left'])))
+	new_data = []
+	top = data[0]['top']
+	temp_list = []
+	for i in data:
+		if(int(i['top'])!=top):
+			new_data.append(temp_list)
+			top = int(i['top'])
+			temp_list = [i]
+		else:
+			temp_list.append(i)
+	for i in range(0,len(new_data)):
+		possible_dates = []
+		for j in range(0,len(new_data[i])):
+			passed = 0
+			for month in calendar_months:
+				if(SequenceMatcher(None, new_data[i][j]['text'].lower(), month).ratio()>=.80):
+					print("HERE SWIGGA 1")
+					new_data[i][j]['text'] = month
+					passed = 1
+					break
+			if(passed==1):
+				try:
+					if(new_data[i][j+1]['text'].strip().replace(",","").isdigit() and new_data[i][j+2]['text'].strip().replace(",","").isdigit()):
+						possible_dates.append([new_data[i][j], new_data[i][j+1], new_data[i][j+2]])
+					else:
+						print("HERE SWIGGA 2")
+						raise Exception("Skip to next try...")
+				except:
+					try:
+						if(new_data[i][j+1]['text'].strip().replace(",","").isdigit()):
+							print("HERE SWIGGA 3")
+							possible_dates.append([new_data[i][j], new_data[i][j+1]])
+							print("HERE SWIGGA 4")
+						else:
+							possible_dates.append([new_data[i][j]])
+					except:
+						possible_dates.append([new_data[i][j]])
+		if(len(possible_dates)==num_cols):
+			return possible_dates
+	return None
+		
 def scrape_financials(full_image_data):
 	'''scrapes financial data from chosen set of images
 	'''
@@ -529,7 +583,6 @@ def scrape_financials(full_image_data):
 		image_lines = replace_dashes(image_lines)
 
 		print(str(max_line_num) + " lines initialized!!! :D !!!")
-		print("Time to initialize lines: " + str(time.time()-time_a) + " seconds!")
 
 		time_a = time.time()
 		for i in range(0,100):	
@@ -538,7 +591,10 @@ def scrape_financials(full_image_data):
 			if(passed==0):
 				print("___ Passed image lines sort on run ___: " + str(i) + " --> ")
 				break
-		print("___ Time taken to sort image lines ___: " + str(time.time()-time_a) + " seconds!")
+		
+		for i in range(0,3):
+			print("_____________________________")
+			print(image_lines[i])
 
 		# sort lines left to right
 		time_a = time.time()
@@ -549,6 +605,8 @@ def scrape_financials(full_image_data):
 			for j in range(1,len(image_lines[i])):
 				if(image_lines[i][j]['text']==image_lines[i][j-1]['text'] and image_lines[i][j]['top']==image_lines[i][j-1]['top']):
 					image_lines[i][j]['text'] = ""
+
+		top_data = image_lines[0]+image_lines[1]
 
 		for i in range(0,len(image_lines)):
 			image_lines[i] = {'text': [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").strip().lower())>0],
@@ -569,16 +627,19 @@ def scrape_financials(full_image_data):
 		num_rows = len(image_lines)
 		print("num_cols:" + str(num_cols))
 		print("num_rows:" + str(num_rows))
-		#try:
+
+		potential_dates = detect_dates(top_data, num_cols)
+		print(potential_dates)
+		import sys
+		sys.exit(0)
+
 		group_by_columns(image_lines, num_cols, num_rows)
 		print("Inputting scraped financial data...")
 		SQL = """
 		insert into financials
-		select * from right_side_5;
+		select * from right_side_6;
 		"""
 		run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
-		#except:
-		#	print("------- FAILED TO INPUT DATA FROM THIS SHEET --------")
 
 Tk().withdraw()
 filename = filedialog.askopenfilename()
@@ -598,16 +659,17 @@ except:
 	images = [filename]
 
 full_image_data = []
-for image in images:
+for old_image in images:
 	time_a = time.time()
-	image_data, image = remove_lines(image)
-	#show_boxes(image_data, filename)
-	#image = cv2.imread(filename)
-	#cv2.imshow("blablabla", image)
-	#waitKey(0)
-	print("Time taken remove_lines: " + str(time.time()-time_a) + " seconds!")
+	image_data, image = remove_lines(old_image)
+	#show_boxes(image_data, image)
+	#import sys
+	#sys.exit(0)
+	print(" ### Time taken to scrape data from image: " + str(time.time()-time_a) + " seconds!")
 	full_image_data.append(image_data)
-	os.remove(image)  
+	os.remove(image)
+	if(len(images))>1:
+		os.remove(old_image)  
 
 scrape_financials(full_image_data)
 
@@ -620,7 +682,7 @@ def output_to_excel():
 		when column=2020 then value end) as this_year, sum(case 
 		when column=2019 then value end) as last_year, sum(case
 		when column=2018 then value end) as year_before, count(*) as total
-		from right_side_5
+		from right_side_6
 		group by page_num, line_num, variable
 		order by page_num, line_num)
 		where total<=3;
