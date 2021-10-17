@@ -2,16 +2,18 @@ import os
 import re
 import tempfile
 import time
-import numpy as np
-import cv2
-from sqlite3.dbapi2 import SQLITE_ALTER_TABLE
-from tkinter import Tk
-from tkinter import filedialog
 from difflib import SequenceMatcher
+from sqlite3.dbapi2 import SQLITE_ALTER_TABLE
+from tkinter import Tk, filedialog
+
+import cv2
+import numpy as np
 from pdf2image import convert_from_path
 from pytesseract import Output, image_to_data
+
 from tricks import (dict_to_sqlite, list_to_dict, most_frequent, run_SQL,
                     send_to_excel)
+
 
 def show_boxes(image_data, filename):
 	'''function for showing borders around words (visualize the data from image_to_data)
@@ -55,8 +57,6 @@ def group_by_lines(image_lines):
 					if(image_lines[i][j]['line_num']>0):
 						image_lines[i][j]['line_num'] -= 1
 						passed = 1
-					else:
-						image_lines[i][j]['text'] = "" #terminate journey of this number, its probably from the top of the sheet
 	return image_lines, passed
 
 def left_rule(data):
@@ -67,6 +67,14 @@ def left_rule(data):
 	left_thresh = 69
 	passed = 0
 	for i in range(0,len(data)):
+		text = data[i]['text']
+		try:
+			text = int(text)
+			if(text>=1969 and text<=2022):
+				print("Aborting removal of: " + str(text) + " because it looks like a year-column-header")
+				continue
+		except:
+			pass
 		left = int(data[i]['left'])
 		if(i==0):
 			if(int(data[i+1]['left'])>(left + left_thresh)):
@@ -270,7 +278,7 @@ def get_column_names(data, num_cols, high_top):
 				return columns
 	return []
 
-def group_by_columns(image_lines, num_cols, num_rows):
+def group_by_columns(image_lines, num_cols, num_rows, columns):
 	'''get table from right side of the page
 	'''
 
@@ -346,10 +354,12 @@ def group_by_columns(image_lines, num_cols, num_rows):
 	high_top = [i['top'] for i in sorted(data, key=lambda row: int(row['top']))]
 	high_top = high_top[int(len(high_top)/4)]
 	print(high_top)
-	columns = get_column_names(isolated, num_cols, int(high_top))
+	if(len(columns)==0):
+		columns = get_column_names(isolated, num_cols, int(high_top))
 	if(len(columns)==0):
 		columns = [i['text'] for i in data[0:num_cols]]
 		data = data[num_cols:]
+	print("----Final Column Defs!!! (swigga)----")
 	print(columns)
 	for i in range(0,len(data),num_cols):
 		for j in range(0,num_cols):
@@ -528,9 +538,35 @@ def detect_dates(data, num_cols):
 					except:
 						possible_dates.append([new_data[i][j]])
 		if(len(possible_dates)==num_cols):
-			return possible_dates
-	return None
-		
+			break
+	if(len(possible_dates)!=num_cols):
+		return None
+	entertain_data = [i for i in new_data if int(i[0]['top'])>int(possible_dates[0][0]['top']) and int(i[0]['top'])<=int(possible_dates[0][0]['top'])+50]
+	entertain_data = [item for sublist in entertain_data for item in sublist]
+	print("ENTERTAIN DATA MY SWIGGA")
+	print(entertain_data)
+	if(len(possible_dates)==num_cols):
+		if(len(possible_dates[0])==2):
+			for i in range(0,len(possible_dates)):
+				surface_1 = [int(possible_dates[i][0]['left']), int(possible_dates[i][-1]['left'])+int(possible_dates[i][-1]['width'])]
+				print("Bounds 1: ")
+				print(surface_1)
+				for j in range(0,len(entertain_data)):
+					surface_2 = [int(entertain_data[j]['left']), int(entertain_data[j]['left'])+int(entertain_data[j]['width'])]
+					if((surface_2[0]>=surface_1[0] and surface_2[0]<=surface_1[1]) or (surface_1[0]>=surface_2[0] and surface_1[0]<=surface_2[1])):
+						try:
+							number_below = int(entertain_data[j]['text'].strip().replace(",",""))
+							print("Bounds 2: " + str(number_below))
+							print(surface_2)
+							if(number_below>=1969 and number_below<=2022):
+								possible_dates[i].append(entertain_data[j])
+						except:
+							pass
+	if(len(possible_dates)==num_cols):
+		return possible_dates
+	else:
+		return None
+
 def scrape_financials(full_image_data):
 	'''scrapes financial data from chosen set of images
 	'''
@@ -544,15 +580,16 @@ def scrape_financials(full_image_data):
 		save_image_data(image_data) #put image data into SQL
 		print("Time taken save_image_data: " + str(time.time()-time_a) + " seconds!")
 		time_a = time.time()
-		temp_data = {'text': [], 'top': [], 'left': [], 'line_num': []}
+		temp_data = {'text': [], 'top': [], 'left': [], 'width': [], 'line_num': []}
 		for i in range(0,len(image_data['text'])):
 			if(image_data['text'][i]!=""):
 				temp_data['text'].append(image_data['text'][i])
 				temp_data['top'].append(image_data['top'][i])
 				temp_data['left'].append(image_data['left'][i])
+				temp_data['width'].append(image_data['width'][i])
 				temp_data['line_num'].append(image_data['line_num'][i])
 		image_data = temp_data #initialize data for single page
-		image_lines = [[{key: image_data[key][0] for key in ('text','top','left')}]] #initialize list of lists data structure, line_num scheme
+		image_lines = [[{key: image_data[key][0] for key in ('text','top','left','width')}]] #initialize list of lists data structure, line_num scheme
 		image_lines[0][0]['line_num'] = 0
 		tack_on = []
 		line_num = 1
@@ -561,14 +598,14 @@ def scrape_financials(full_image_data):
 		for i in range(0,len(image_data['text'])):
 			if image_data['left'][i]<115:
 				if(image_data['top'][i]>image_lines[len(image_lines)-1][0]['top']+5):
-					line = {key: image_data[key][i] for key in ('text','top','left','line_num')}
+					line = {key: image_data[key][i] for key in ('text','top','left','width','line_num')}
 					line['line_num'] = line_num
 					line_num+=1
 					image_lines.append([line])
 				else:
-					tack_on.append({key: image_data[key][i] for key in ('text','top','left','line_num')})
+					tack_on.append({key: image_data[key][i] for key in ('text','top','left','width','line_num')})
 			else:
-				tack_on.append({key: image_data[key][i] for key in ('text','top','left','line_num')})
+				tack_on.append({key: image_data[key][i] for key in ('text','top','left','width','line_num')})
 
 		#last item in list includes all other data, sorted from top to bottom
 		tack_on = sorted(tack_on, key = lambda num: num['top'], reverse=True)
@@ -629,11 +666,15 @@ def scrape_financials(full_image_data):
 		print("num_rows:" + str(num_rows))
 
 		potential_dates = detect_dates(top_data, num_cols)
-		print(potential_dates)
-		import sys
-		sys.exit(0)
+		columns = []
+		if(potential_dates):
+			for row in potential_dates:
+				print(" ".join([i['text'] for i in row]))
+			for i in potential_dates:
+				column = " ".join([j['text'] for j in i])
+				columns.append(column)
 
-		group_by_columns(image_lines, num_cols, num_rows)
+		group_by_columns(image_lines, num_cols, num_rows, columns)
 		print("Inputting scraped financial data...")
 		SQL = """
 		insert into financials
