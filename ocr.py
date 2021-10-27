@@ -1,19 +1,14 @@
 import os
 import re
-import tempfile
-import time
-from difflib import SequenceMatcher
-from sqlite3.dbapi2 import SQLITE_ALTER_TABLE
-from tkinter import Tk, filedialog
-
 import cv2
+import time
+import tempfile
 import numpy as np
+from tkinter import Tk, filedialog
+from difflib import SequenceMatcher
 from pdf2image import convert_from_path
 from pytesseract import Output, image_to_data
-
-from tricks import (dict_to_sqlite, list_to_dict, most_frequent, run_SQL,
-                    send_to_excel)
-
+from tricks import (dict_to_sqlite, list_to_dict, most_frequent, run_SQL, send_to_excel)
 
 def show_boxes(image_data, filename):
 	'''function for showing borders around words (visualize the data from image_to_data)
@@ -24,16 +19,9 @@ def show_boxes(image_data, filename):
 		cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
 	cv2.imshow('Results',image)
 	cv2.waitKey(0)
-	#boxes = str(os.path.abspath(os.path.dirname( __file__ ))+"\{}.png").format(os.getpid()+1)
-	#cv2.imwrite(boxes, image)
+	boxes = str(os.path.abspath(os.path.dirname( __file__ ))+"\{}.png").format(os.getpid()+1)
+	cv2.imwrite(boxes, image)
 	return
-
-#filename = os.path.abspath(os.path.dirname( __file__ ))+'\ca20ad42-8201-4cfe-af72-9965f25f53e9-4.ppm'
-#image_data = image_to_data(filename, output_type = Output.DICT)
-#show_boxes(image_data, filename)
-#import sys
-#sys.exit(0)
-#---------------------- UNCOMMENT THIS TO SEE BOXES ------------------------------#
 
 def pdf_to_image(filename):
 	'''OCR only works on images, so convert all pdfs to a list of images
@@ -282,114 +270,137 @@ def group_by_columns(image_lines, num_cols, num_rows, columns):
 	'''get table from right side of the page
 	'''
 
-	# get right 3/4 of data from page
-	SQL = """drop table if exists right_side;"""
+	SQL = """drop table if exists image_data_1;"""
 	run_SQL(SQL, commit_indic='y')
 	SQL = """
-		create table right_side as
-		select cast(left as 'decimal') as left, text, cast(top as 'decimal') as top, cast(width as 'decimal') as width
-		from image_table
+		create table image_data_1 as
+		select cast(left as 'decimal') as left, text, cast(top as 'decimal') as top, cast(width as 'decimal') as width,
+		case
+		"""
+	for i in range(0,len(image_lines)):
+		top_range = image_lines[i]['top']
+		SQL += " when cast(top as 'decimal') between " + str(top_range[0]) + " and " + str(top_range[1]) + " then " + str(i) + "\n"
+	SQL += """ 
+		end as line_num, """ + str(image_lines[0]['page_num']) + """ as page_num
+		from image_data;
+		"""
+	print(SQL)
+	run_SQL(SQL, commit_indic='y')
+
+	# bring in variable name determined in step 1
+	SQL = """select * from image_data_1 where line_num is not null;"""
+	data = run_SQL(SQL)
+	for i in range(0,len(data)):
+		for j in range(0,len(image_lines)):
+			if(int(data[i]['line_num'])==j):
+				data[i]['variable'] = image_lines[j]['variable']
+	data_dict = list_to_dict(data)
+	dict_to_sqlite(data_dict,"image_data_2")
+
+	# get right 3/4 of data from page
+	SQL = """drop table if exists image_data_3;"""
+	run_SQL(SQL, commit_indic='y')
+	SQL = """
+		create table image_data_3 as
+		select *
+		from image_data_2
 		where text not in ('$',' ', 'S$','§')
-		and cast(left as 'decimal')>(select max(cast(left as 'decimal'))/4 from image_table)
-		order by cast(top as 'decimal') asc, cast(left as 'decimal') asc;"""
+		and cast(left as 'decimal')>(select max(cast(left as 'decimal'))/4 from image_data_2);
+		"""
 	run_SQL(SQL, commit_indic='y')
 
 	# look at data left to right and remove stuff that doesn't appear to line up with a column
 	time_a = time.time()
-	SQL = """select distinct text, left, top, width from right_side order by cast(left as 'decimal') asc;"""
+	SQL = """select * from image_data_3 order by cast(left as 'decimal') asc;"""
 	data = run_SQL(SQL)
 	data = implement_left_rule(data)
 	data_dict = list_to_dict(data)
-	dict_to_sqlite(data_dict,"right_side_1")
+	dict_to_sqlite(data_dict,"image_data_4")
 	print("Time taken implement_left_rule: " + str(time.time()-time_a) + " seconds!")
+
+	# remove non-numeric data other than stuff near the top of the page (could be column headings)
+	SQL = """select * from image_data_4;"""
+	data = run_SQL(SQL)
+	high_top = [i['top'] for i in sorted(data, key=lambda row: int(row['top']))]
+	high_top = int(high_top[int(len(high_top)/8)])
+	print("Column headers must be located less than " + str(high_top) + " units from the top!")
+	data = [i for i in data if i['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").replace("-","").replace("0.","").strip().lower().isdigit() or int(i['top'])<=high_top]
+	data_dict = list_to_dict(data)
+	dict_to_sqlite(data_dict,"image_data_5")
 
 	# look at data top to bottom and group into rows of data
 	time_a  = time.time()
-	SQL = """select distinct text, left, top, width from right_side_1 order by cast(top as 'decimal') asc;"""
+	SQL = """select * from image_data_5 order by cast(top as 'decimal') asc;"""
 	data = run_SQL(SQL)
 	data, isolated = implement_top_rule(data, num_cols, num_rows)
 	print(data)
 	data_dict = list_to_dict(data)
-	dict_to_sqlite(data_dict,"right_side_2")
+	dict_to_sqlite(data_dict,"image_data_6")
 	print("Time taken implement_top_rule: " + str(time.time()-time_a) + " seconds!")
 
 	# define column boundaries for writing SQL case to label column number
 	time_a = time.time()
-	SQL = """select distinct text, left, top from right_side_2 order by cast(left as 'decimal') asc;"""
+	SQL = """select distinct text, left, top from image_data_6 order by cast(left as 'decimal') asc;"""
 	data = run_SQL(SQL)
 	results = [0] + detect_gaps(data)
 	print("Column boundaries: ")
 	print(results)
-	SQL = """drop table if exists right_side_3;"""
+	SQL = """drop table if exists image_data_7;"""
 	run_SQL(SQL, commit_indic='y')
 	SQL = """
-		create table right_side_3 as
-		select distinct text, left, top, case
+		create table image_data_7 as
+		select distinct variable, text, left, top, width, line_num, page_num, case
 		"""
 	counter = 1
 	for i in range(0,len(results)-1):
-		SQL += " when cast(left as 'decimal') between " + str(results[i]) + " and " + str(results[i+1]) + " then 'group_"+str(counter) + "'"
+		SQL += " when cast(left as 'decimal') between " + str(results[i]) + " and " + str(results[i+1]) + " then "+str(counter)
 		counter+=1
-	SQL += " when cast(left as 'decimal')>=" + str(results[-1]) + " then 'group_"+str(counter) + "'"
+	SQL += " when cast(left as 'decimal')>=" + str(results[-1]) + " then "+str(counter)
 	SQL += """ end as col_num
-		from right_side_2;
+		from image_data_6;
 		"""
 	print(SQL)
 	run_SQL(SQL, commit_indic='y')
 
 	# make sure that top value is normalized for stuff on the same line
-	data = run_SQL("select * from right_side_3 order by cast(top as 'decimal') asc;")
+	data = run_SQL("select * from image_data_7 order by cast(top as 'decimal') asc;")
 	print(num_cols)
 	for i in range(0,len(data),num_cols):
 		top = str(data[i]['top'])
 		for j in range(0,num_cols):
 			data[i+j]['top'] = top
-	SQL = """drop table if exists right_side_4;"""
-	run_SQL(SQL, commit_indic='y')
 	data_dict = list_to_dict(data)
-	dict_to_sqlite(data_dict,"right_side_4")
+	dict_to_sqlite(data_dict,"image_data_8")
 
 	# extract names of columns from page data, only consider those in top quarter of data (header must be near or at the top)
-	data = run_SQL("select * from right_side_4 order by cast(top as 'decimal') asc, cast(left as 'decimal');")
-	high_top = [i['top'] for i in sorted(data, key=lambda row: int(row['top']))]
-	high_top = high_top[int(len(high_top)/4)]
-	print(high_top)
+	data = run_SQL("select * from image_data_8 order by cast(top as 'decimal') asc, cast(left as 'decimal');")	
 	if(len(columns)==0):
 		columns = get_column_names(isolated, num_cols, int(high_top))
 	if(len(columns)==0):
 		columns = [i['text'] for i in data[0:num_cols]]
 		data = data[num_cols:]
-	print("----Final Column Defs!!! (swigga)----")
+	print("_______________Final Column Defs_______________")
 	print(columns)
+	print("_______________________________________________")
 	for i in range(0,len(data),num_cols):
 		for j in range(0,num_cols):
 			data[i+j]['column'] = columns[j]
 
-	#join in data from step 1 (variable, line_num, rank)
-	for i in range(0,len(data)):
-		for j in range(0,len(image_lines)):
-			if(int(data[i]['top'])<=int(image_lines[j]['top'])+4 and int(data[i]['top'])>=int(image_lines[j]['top'])-4):
-				data[i]['variable'] = image_lines[j]['variable']
-				data[i]['line_num'] = str(j)
-				data[i]['page_num'] = image_lines[j]['page_num']
-
-	data = [i for i in data if 'variable' in i.keys()]
 	for i in range(0,len(data)):
 		data[i]['text'] = data[i]['text'].replace(",","").replace("..",".").replace(".,",".").replace(",.",".")
 	data = replace_dashes_new(data)
-	SQL = """drop table if exists right_side_5;"""
-	run_SQL(SQL, commit_indic='y')
 	data_dict = list_to_dict(data)
-	dict_to_sqlite(data_dict,"right_side_5")
+	dict_to_sqlite(data_dict,"image_data_9")
 
 
-	SQL = """drop table if exists right_side_6;"""
+	SQL = """drop table if exists image_data_10;"""
 	run_SQL(SQL, commit_indic='y')
 	SQL = """
-		create table right_side_6 as
-		select distinct variable, cast(replace(text,'—','-') as 'decimal') as value, column, cast(line_num as 'decimal') as line_num,
-		cast(left as 'decimal') as left, cast(top as 'decimal') as top, cast(page_num as 'decimal') as page_num, col_num
-		from right_side_5;
+		create table image_data_10 as
+		select distinct variable, cast(replace(text,'—','-') as 'decimal') as value, column, cast(page_num as 'decimal') as page_num,
+		cast(line_num as 'decimal') as line_num, cast(col_num as 'decimal') as col_num, cast(top as 'decimal') as top,
+		cast(left as 'decimal') as left, cast(width as 'decimal') as width
+		from image_data_9;
 		"""
 	run_SQL(SQL, commit_indic='y')
 
@@ -435,7 +446,7 @@ def save_image_data(image_data):
 			for key in columns:
 				data_dict[key].append(str(image_data[key][i]))
 	print('Number of rows going in... '+ str(len(data_dict['text']))) #how long is the dict we're getting out?
-	dict_to_sqlite(data_dict,'image_table')
+	dict_to_sqlite(data_dict,'image_data')
 	return
 
 def remove_lines(filename):
@@ -459,7 +470,7 @@ def remove_lines(filename):
 	filename = str(os.path.abspath(os.path.dirname( __file__ ))+"\{}.png").format(os.getpid())
 	cv2.imwrite(filename, img)
 	time_a = time.time()
-	image_data = image_to_data(filename, output_type = Output.DICT)
+	image_data = image_to_data(filename, config='--psm 11', output_type = Output.DICT)
 	print("Time taken image_to_data: " + str(time.time()-time_a) + " seconds!")
 	return image_data, filename
 
@@ -646,8 +657,10 @@ def scrape_financials(full_image_data):
 		top_data = image_lines[0]+image_lines[1]
 
 		for i in range(0,len(image_lines)):
+			top_list = [k['top'] for k in image_lines[i]]
+			top_range = [min(top_list),max(top_list)]
 			image_lines[i] = {'text': [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").strip().lower())>0],
-							 'top': image_lines[i][0]['top'], 'page_num': str(page_num+1)}
+							 'top': top_range, 'page_num': str(page_num+1)}
 
 		for i in range(0,len(image_lines)):
 			values = []
@@ -704,6 +717,7 @@ for old_image in images:
 	time_a = time.time()
 	image_data, image = remove_lines(old_image)
 	#show_boxes(image_data, image)
+	#os.remove(image)
 	#import sys
 	#sys.exit(0)
 	print(" ### Time taken to scrape data from image: " + str(time.time()-time_a) + " seconds!")
