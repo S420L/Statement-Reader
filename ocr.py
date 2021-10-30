@@ -1,5 +1,6 @@
 import os
 import re
+from sys import _debugmallocstats
 import cv2
 import time
 import tempfile
@@ -221,10 +222,9 @@ def top_rule(data):
 			break
 	
 	isolated = sorted(isolated, key = lambda row: int(row['top']), reverse=False)
-	print("ISOLATED MY SWIGGA")
+	print("______________ISOLATED MY SWIGGA_______________")
 	print(isolated)
-	print("DATA MY SWIGGA")
-	print(data[0:5])
+	print("_______________________________________________")
 
 	#enforce that data fits the structure of length N rows
 	for i in range(0,69):
@@ -340,41 +340,47 @@ def group_by_columns(image_lines, num_cols, num_rows, columns):
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"image_data_6")
 
+	# isolate data with too much whitespace above and below to be considered part of a column
+	data = run_SQL("select * from image_data_6;")
+	isolated = []
+	for i in range(0,69):
+		data, passed, isolated = isolate_whitespace(data, num_rows, isolated)
+		if(passed==0):
+			print("Passed isolate_whitespace on run #" + str(i) + "? --> " + str(passed))
+			break
+	isolated = sorted(isolated, key = lambda row: int(row['top']), reverse=False)
+	if(len(isolated)>0):
+		dict_to_sqlite(list_to_dict(isolated),"garbage")
+	else:
+		run_SQL("delete from garbage;",commit_indic='y')
+	dict_to_sqlite(list_to_dict(data),"image_data_7")
+
 	# throw out lines where (# of data points > # columns)
 	SQL = """
-		select * from image_data_6 where line_num in (
-		select distinct line_num from (
-		select distinct line_num, count(*) as count 
-		from image_data_6
-		group by line_num 
-		order by count(*) asc)
-		where count>"""+str(num_cols)+""")
-		or text not GLOB '*[0-9]*';
-		"""
-	dict_to_sqlite(list_to_dict(run_SQL(SQL)),"garbage")
-	SQL = "select * from image_data_6 where line_num not in (select distinct line_num from garbage);"
-	dict_to_sqlite(list_to_dict(run_SQL(SQL)),"image_data_7")
-
-	import sys
-	sys.exit(0)
-
-	# look at data top to bottom and group into rows of data
-	SQL = """select * from image_data_5 order by cast(top as 'decimal') asc;"""
-	data = run_SQL(SQL)
-	data, isolated = implement_top_rule(data, num_cols, num_rows)
-	data_dict = list_to_dict(data)
-	dict_to_sqlite(data_dict,"image_data_6")
+	insert into garbage
+	select * from image_data_7 where line_num in (
+	select distinct line_num from (
+	select distinct line_num, count(*) as count 
+	from image_data_7
+	group by line_num 
+	order by count(*) asc)
+	where count>"""+str(num_cols)+""")
+	or text not GLOB '*[0-9]*';
+	"""
+	run_SQL(SQL, commit_indic='y')
+	SQL = "select * from image_data_7 where line_num not in (select distinct line_num from garbage);"
+	dict_to_sqlite(list_to_dict(run_SQL(SQL)),"image_data_8")
 
 	# define column boundaries for writing SQL case to label column number
-	SQL = """select distinct text, left, top from image_data_6 order by cast(left as 'decimal') asc;"""
+	SQL = """select distinct text, left, top from image_data_8 order by cast(left as 'decimal') asc;"""
 	data = run_SQL(SQL)
 	results = [0] + detect_gaps(data)
 	print("Column boundaries: ")
 	print(results)
-	SQL = """drop table if exists image_data_7;"""
+	SQL = """drop table if exists image_data_9;"""
 	run_SQL(SQL, commit_indic='y')
 	SQL = """
-		create table image_data_7 as
+		create table image_data_9 as
 		select distinct variable, text, left, top, width, line_num, page_num, case
 		"""
 	counter = 1
@@ -383,10 +389,13 @@ def group_by_columns(image_lines, num_cols, num_rows, columns):
 		counter+=1
 	SQL += " when cast(left as 'decimal')>=" + str(results[-1]) + " then "+str(counter)
 	SQL += """ end as col_num
-		from image_data_6;
+		from image_data_8;
 		"""
 	print(SQL)
 	run_SQL(SQL, commit_indic='y')
+
+	import sys
+	sys.exit(0)
 
 	# make sure that top value is normalized for stuff on the same line
 	data = run_SQL("select * from image_data_7 order by cast(top as 'decimal') asc;")
@@ -484,15 +493,16 @@ def remove_lines(filename):
 	kernel = np.ones((1, 1), np.uint8)
 	img = cv2.dilate(img, kernel, iterations=1)
 	img = cv2.erode(img, kernel, iterations=1)
-	lns = cv2.ximgproc.createFastLineDetector(length_threshold=12, distance_threshold=.25).detect(img)
+	lns = cv2.ximgproc.createFastLineDetector(length_threshold=18).detect(img)
 	if lns is not None:
 		for ln in lns:
 			(x_start, y_start, x_end, y_end) = [int(i) for i in ln[0]]
 			if(abs(abs(float(y_start))-abs(float(y_end)))<5):
-				#print("x_start: " + str(x_start) + "  " + "x_end: " + str(x_end) + "  y_start: " + str(y_start) + "  " + "y_end: " + str(y_end))
-				cv2.line(img, (x_start-(x_end-x_start), y_start), (x_end, y_end), (255, 255, 255), thickness=10)
+				cv2.line(img, (x_start-(x_end-x_start), y_start+2), (x_end+2, y_end+2), (255, 255, 255), thickness=6)
 	filename = str(os.path.abspath(os.path.dirname( __file__ ))+"\{}.png").format(os.getpid())
 	cv2.imwrite(filename, img)
+	#import sys
+	#sys.exit(0)
 	time_a = time.time()
 	image_data = image_to_data(filename, config='--psm 11', output_type = Output.DICT)
 	print("Time taken image_to_data: " + str(time.time()-time_a) + " seconds!")
@@ -671,7 +681,7 @@ def scrape_financials(full_image_data):
 		# sort lines left to right
 		time_a = time.time()
 		for i in range(0,len(image_lines)):
-			image_lines[i] = sorted(image_lines[i], key = lambda var: var['left'], reverse = False)
+			image_lines[i] = sorted(image_lines[i], key = lambda var: var['left'])
 
 		for i in range(0,len(image_lines)):
 			for j in range(1,len(image_lines[i])):
@@ -685,6 +695,9 @@ def scrape_financials(full_image_data):
 			top_range = [min(top_list),max(top_list)]
 			image_lines[i] = {'text': [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").strip().lower())>0],
 							 'top': top_range, 'page_num': str(page_num+1)}
+			print("Top range image_lines: " + str(i) + " " + str(top_range[1]-top_range[0]))
+		#import sys
+		#sys.exit(0)
 
 		for i in range(0,len(image_lines)):
 			values = []
@@ -720,8 +733,8 @@ def scrape_financials(full_image_data):
 		run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
 
 Tk().withdraw()
-#filename = filedialog.askopenfilename()
-filename = 'C:\\Users\\micha\\Desktop\\financial statement reader\\test - Tesla\\e9f7bb6a-f6b7-4b3d-beec-afdcb2f9e644-4.ppm' #manual for testing
+filename = filedialog.askopenfilename()
+#filename = 'C:\\Users\\micha\\Desktop\\financial statement reader\\test - Tesla\\e9f7bb6a-f6b7-4b3d-beec-afdcb2f9e644-4.ppm' #manual for testing
 #filename = os.path.abspath(os.path.dirname( __file__ ))+'\\ca20ad42-8201-4cfe-af72-9965f25f53e9-2.ppm' #manual for testing
 #filename = os.path.abspath(os.path.dirname( __file__ ))+'\\ca20ad42-8201-4cfe-af72-9965f25f53e9-3.ppm' #manual for testing
 #filename = os.path.abspath(os.path.dirname( __file__ ))+'\\7c30942b-b2a5-4713-9354-afd1f957545e-1.ppm' #manual for testing
