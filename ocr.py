@@ -193,7 +193,10 @@ def group_by_columns(image_lines, num_cols, num_rows, columns):
 		if("," in data[i]['text']):
 			if(len(data[i]['text'][data[i]['text'].index(','):].replace(")","").replace(",",""))<3):
 				data[i]['text'] = data[i]['text'].replace(",",".")
-		data[i]['text'] = data[i]['text'].replace("0,",".").replace("..",".").replace(".,",".").replace(",.",".").replace(",","")
+		if(len(data[i]['text'].strip())>=3):
+			if("0," in data[i]['text'].replace("(","")[0:2]):
+				data[i]['text'] = data[i]['text'].replace("0,",".")
+		data[i]['text'] = data[i]['text'].replace("..",".").replace(".,",".").replace(",.",".").replace(",","")
 				
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"image_data_2")
@@ -223,7 +226,7 @@ def group_by_columns(image_lines, num_cols, num_rows, columns):
 	high_top = [i['top'] for i in sorted(data, key=lambda row: int(row['top']))]
 	high_top = int(high_top[int(len(high_top)/2)])
 	print("Column headers must be located less than " + str(high_top) + " units from the top!")
-	data = [i for i in data if i['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").replace("-","").replace("0.","").strip().lower().isdigit() or int(i['top'])<=high_top]
+	data = [i for i in data if i['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").replace("-","").replace("0.","").strip().lower().replace(".","").isdigit() or int(i['top'])<=high_top]
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"image_data_5")
 
