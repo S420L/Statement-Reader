@@ -36,6 +36,20 @@ def dict_to_sqlite(box_dict, table_name, database=str(os.path.abspath(os.path.di
 		conn.commit()
 	conn.close()
 
+def update_in_table(table, update_column, value, conditional):
+    '''arbitrarily update stuff in the database
+    '''
+    if value is not None:
+        value = "'" + value + "'"
+    else:
+        value = "null"
+    SQL = """
+        update """ + table + """
+        set """ + update_column + """ = """ + value + """
+        """ + """ """ + conditional + """;"""
+    print(SQL)
+    run_SQL(SQL,'y')
+
 def run_SQL(SQL, commit_indic='n', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db")):
 	conn = sqlite3.connect(database)
 	conn.row_factory = sqlite3.Row
@@ -97,12 +111,3 @@ def list_to_dict(data_list):
 		for j in keys:
 			data_dict[j].append(data_list[i][j])
 	return data_dict
-
-#Display image
-def display(img, frameName="OpenCV Image"):
-    h, w = img.shape[0:2]
-    neww = 800
-    newh = int(neww*(h/w))
-    img = resize(img, (neww, newh))
-    imshow(frameName, img)
-    waitKey(0)
