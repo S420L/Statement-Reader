@@ -100,7 +100,7 @@ def left_rule(data):
 
 time_a = time.time()
 def implement_left_rule(data):
-	for i in range(0,69):	
+	for i in range(0,69):
 		data, passed = left_rule(data)
 		if(passed==0):
 			print("Passed left on run " + str(i) + "? --> " + str(passed))
@@ -328,18 +328,44 @@ def group_by_columns(image_lines, num_cols, num_rows, columns):
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"image_data_5")
 
+	# don't let values be on the same line number if the top discrepancy is more than 20 (send to line 420 as default)
+	SQL = """select * from image_data_5;"""
+	data = run_SQL(SQL)
+	for i in range(0,len(data)):
+		line_num = data[i]['line_num']
+		current_top = int(data[i]['top'])
+		min_top = min([int(j['top']) for j in data if j['line_num']==line_num])
+		if(abs(current_top-min_top)>20):
+			data[i]['line_num'] = 420
+	data_dict = list_to_dict(data)
+	dict_to_sqlite(data_dict,"image_data_6")
+
+	# throw out lines where (# of data points > # columns)
+	SQL = """
+		select * from image_data_6 where line_num in (
+		select distinct line_num from (
+		select distinct line_num, count(*) as count 
+		from image_data_6
+		group by line_num 
+		order by count(*) asc)
+		where count>"""+str(num_cols)+""")
+		or text not GLOB '*[0-9]*';
+		"""
+	dict_to_sqlite(list_to_dict(run_SQL(SQL)),"garbage")
+	SQL = "select * from image_data_6 where line_num not in (select distinct line_num from garbage);"
+	dict_to_sqlite(list_to_dict(run_SQL(SQL)),"image_data_7")
+
+	import sys
+	sys.exit(0)
+
 	# look at data top to bottom and group into rows of data
-	time_a  = time.time()
 	SQL = """select * from image_data_5 order by cast(top as 'decimal') asc;"""
 	data = run_SQL(SQL)
 	data, isolated = implement_top_rule(data, num_cols, num_rows)
-	print(data)
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"image_data_6")
-	print("Time taken implement_top_rule: " + str(time.time()-time_a) + " seconds!")
 
 	# define column boundaries for writing SQL case to label column number
-	time_a = time.time()
 	SQL = """select distinct text, left, top from image_data_6 order by cast(left as 'decimal') asc;"""
 	data = run_SQL(SQL)
 	results = [0] + detect_gaps(data)
@@ -458,15 +484,13 @@ def remove_lines(filename):
 	kernel = np.ones((1, 1), np.uint8)
 	img = cv2.dilate(img, kernel, iterations=1)
 	img = cv2.erode(img, kernel, iterations=1)
-	lns = cv2.ximgproc.createFastLineDetector(length_threshold=20).detect(img)
-	#img = cv2.threshold(cv2.medianBlur(img, 3), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+	lns = cv2.ximgproc.createFastLineDetector(length_threshold=12, distance_threshold=.25).detect(img)
 	if lns is not None:
 		for ln in lns:
 			(x_start, y_start, x_end, y_end) = [int(i) for i in ln[0]]
 			if(abs(abs(float(y_start))-abs(float(y_end)))<5):
 				#print("x_start: " + str(x_start) + "  " + "x_end: " + str(x_end) + "  y_start: " + str(y_start) + "  " + "y_end: " + str(y_end))
-				cv2.line(img, (x_start-(x_end-x_start), y_start+2), (x_end, y_end+2), (255, 255, 255), thickness=4)
-	#thr = adaptiveThreshold(gry, 255, ADAPTIVE_THRESH_MEAN_C, THRESH_BINARY, 21, 1)
+				cv2.line(img, (x_start-(x_end-x_start), y_start), (x_end, y_end), (255, 255, 255), thickness=10)
 	filename = str(os.path.abspath(os.path.dirname( __file__ ))+"\{}.png").format(os.getpid())
 	cv2.imwrite(filename, img)
 	time_a = time.time()
@@ -696,8 +720,8 @@ def scrape_financials(full_image_data):
 		run_SQL(SQL, commit_indic='y', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db"))
 
 Tk().withdraw()
-filename = filedialog.askopenfilename()
-#filename = os.path.abspath(os.path.dirname( __file__ ))+'\ca20ad42-8201-4cfe-af72-9965f25f53e9-1.ppm' #manual for testing
+#filename = filedialog.askopenfilename()
+filename = 'C:\\Users\\micha\\Desktop\\financial statement reader\\test - Tesla\\e9f7bb6a-f6b7-4b3d-beec-afdcb2f9e644-4.ppm' #manual for testing
 #filename = os.path.abspath(os.path.dirname( __file__ ))+'\\ca20ad42-8201-4cfe-af72-9965f25f53e9-2.ppm' #manual for testing
 #filename = os.path.abspath(os.path.dirname( __file__ ))+'\\ca20ad42-8201-4cfe-af72-9965f25f53e9-3.ppm' #manual for testing
 #filename = os.path.abspath(os.path.dirname( __file__ ))+'\\7c30942b-b2a5-4713-9354-afd1f957545e-1.ppm' #manual for testing
