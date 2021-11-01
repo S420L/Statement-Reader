@@ -1,6 +1,5 @@
 import os
 import re
-from sys import _debugmallocstats
 import cv2
 import time
 import tempfile
@@ -28,7 +27,7 @@ def pdf_to_image(filename):
 	'''OCR only works on images, so convert all pdfs to a list of images
 	'''
 	with tempfile.TemporaryDirectory() as path:
-		images_from_path = convert_from_path(filename, output_folder=os.path.abspath(os.path.dirname(__file__)))
+		images_from_path = convert_from_path(filename, output_folder=str(os.path.abspath(os.path.dirname(__file__))+"\\temp"))
 		print('running for image: ' + str(images_from_path))
 		filenames = [i.filename for i in images_from_path]
 		return filenames
@@ -123,7 +122,7 @@ def detect_gaps(data):
 	return sorted(results, key = lambda num: num, reverse=False)
 
 def get_column_names(data, num_cols, high_top):
-	left_thresh = 200
+	left_thresh = 150
 	front,back = [],[]
 	for i in data:
 		try:
@@ -175,7 +174,7 @@ def save_image_data(image_data):
 	'''save cleaned data from OCR program
 	'''
 	pattern = re.compile(r'[A-Z][0-9]')
-	columns = ['left','top','width','height','text']
+	columns = ['text','line_num','left','top','width','height']
 	data_dict = {i:[] for i in columns}
 	for i in range(0,len(image_data['text'])):
 		if(image_data['text'][i] not in ('',' ',None,'$','§')):
@@ -213,23 +212,10 @@ def preprocess_image(filename):
 	return img
 
 def get_image_data(img):
-	filename = str(os.path.abspath(os.path.dirname( __file__ ))+"\{}.png").format(os.getpid())
+	filename = str(os.path.abspath(os.path.dirname( __file__ ))+"\\temp\{}.png").format(os.getpid())
 	cv2.imwrite(filename, img)
 	image_data = image_to_data(filename, config='--psm 11', output_type = Output.DICT)
 	return image_data, filename
-
-def replace_dashes(image_lines):
-	'''turn dashes into zeros, reposition dashes so that the "top" value isn't so different from other numbers
-	'''
-	for i in range(0,len(image_lines)):
-		for j in range(0,len(image_lines[i])):
-			if(image_lines[i][j]['text'].strip()==b'\xe2\x80\x94'.decode('utf-8')):
-				image_lines[i][j]['text'] = str(0)
-				image_lines[i][j]['top'] = float(image_lines[i][j]['top']) - 10
-			elif(image_lines[i][j]['text'].strip()[0]=="(" and image_lines[i][j]['text'].strip()[-1]==")"):
-				if(image_lines[i][j]['text'].replace("(","").replace(")","").replace("0.","").replace(".","").replace(",","").strip().isdigit()):
-					image_lines[i][j]['text'] = str("—" + image_lines[i][j]['text'][1:-1])
-	return image_lines
 
 def clean_numbers(data):
 	'''turn dashes into zeros, reposition dashes so that the "top" value isn't so different from other numbers
@@ -241,6 +227,9 @@ def clean_numbers(data):
 		elif(data[i]['text'].strip()[0]=="(" and data[i]['text'].strip()[-1]==")"):
 			if(data[i]['text'].replace("(","").replace(")","").replace("0.","").replace(".","").replace(",","").strip().isdigit()):
 				data[i]['text'] = str("—" + data[i]['text'][1:-1])
+		data[i]['top'] = int(data[i]['top'])
+		data[i]['left'] = int(data[i]['left'])
+		data[i]['width'] = int(data[i]['width'])
 	return data
 
 def detect_dates(data, num_cols):
@@ -498,28 +487,16 @@ def group_by_columns(image_lines, num_cols, num_rows, columns):
 def scrape_financials(image_data, page_num):
 	'''scrapes financial data from chosen set of images
 	'''
-	#apply table processing logic to each image
-	time_a = time.time()
-	save_image_data(image_data) #put image data into SQL
-	print("Time taken save_image_data: " + str(time.time()-time_a) + " seconds!")
-	time_a = time.time()
-	temp_data = {'text': [], 'top': [], 'left': [], 'width': [], 'line_num': []}
-	for i in range(0,len(image_data['text'])):
-		if(image_data['text'][i]!=""):
-			temp_data['text'].append(image_data['text'][i])
-			temp_data['top'].append(image_data['top'][i])
-			temp_data['left'].append(image_data['left'][i])
-			temp_data['width'].append(image_data['width'][i])
-			temp_data['line_num'].append(image_data['line_num'][i])
-	image_data = temp_data #initialize data for single page
-	image_lines = [[{key: image_data[key][0] for key in ('text','top','left','width')}]] #initialize list of lists data structure, line_num scheme
+	save_image_data(image_data) #throw into SQL
+	SQL = """select * from image_data where text<>'' and text is not null and text<>' ';"""
+	image_data = list_to_dict(clean_numbers(run_SQL(SQL)))
+	# start of my hairbrained image_lines scheme
+	image_lines = [[{key: image_data[key][0] for key in ('text','top','left','width')}]]
 	image_lines[0][0]['line_num'] = 0
 	tack_on = []
 	line_num = 1
-	
-	# determine beginnings of lines based on words within a left threshold
 	for i in range(0,len(image_data['text'])):
-		if image_data['left'][i]<169:
+		if image_data['left'][i]<300: # define how far out the start of a line can be
 			if(image_data['top'][i]>image_lines[len(image_lines)-1][0]['top']+5):
 				line = {key: image_data[key][i] for key in ('text','top','left','width','line_num')}
 				line['line_num'] = line_num
@@ -537,7 +514,6 @@ def scrape_financials(image_data, page_num):
 		image_lines[-1][i]['line_num'] = max_line_num
 	for i in range(0,len(image_lines)):
 		image_lines[i] = [k for k in image_lines[i] if k['text'].strip()!=""]
-	image_lines = replace_dashes(image_lines)
 
 	# group data into lines, sort left to right
 	for i in range(0,100):	
@@ -569,7 +545,7 @@ def scrape_financials(image_data, page_num):
 		image_lines[i]['variable'] = variable.replace("\"","").replace("§","")
 		image_lines[i]['values'] = values
 		
-	num_cols = most_frequent([len(i['values']) for i in image_lines])
+	num_cols = most_frequent([len(i['values']) for i in image_lines if len(i['values'])>0])
 	num_rows = len(image_lines)
 	print(str(num_rows) + " rows and " + str(num_cols) + " columns being initialized:")
 	potential_dates = detect_dates(top_data, num_cols)
@@ -614,7 +590,7 @@ for page_num in range(0,len(images)):
 	image_data, image = get_image_data(img)
 	print("Time taken to get image data from OCR: " + str(round(time.time()-time_a,2)) + " seconds!")
 	#show_boxes(image_data, image)
-	#os.remove(image)
+	#os.remove(image) 
 	#import sys
 	#sys.exit(0)
 	os.remove(image)
