@@ -76,8 +76,9 @@ def send_to_excel(path, data, workbook, sheet="Sheet1", clear_indic='n', cells=N
 	#iterate through dict of lists, send to excel--indexes start at 1
 	if cells==None:
 		max_col = str(list(string.ascii_uppercase)[len(data)-1])
+		clear_col = str(list(string.ascii_uppercase)[12])
 		if clear_indic=='y':
-			for row in output_sheet['A2:'+max_col+'4269']:
+			for row in output_sheet['A2:'+clear_col+'4269']:
 				for cell in row:
 					cell.value = None
 		columns = list(data.keys())
@@ -87,6 +88,9 @@ def send_to_excel(path, data, workbook, sheet="Sheet1", clear_indic='n', cells=N
 				output_sheet.cell(row=j+2,column=i+1).value = data[name][j]
 		if(headings=='y'):
 			counter = 0
+			for row in output_sheet['A1:'+clear_col+str(1)]:
+				for cell in row:
+					cell.value = None
 			for row in output_sheet['A1:'+max_col+str(1)]:
 				for cell in row:
 					cell.value = columns[counter]

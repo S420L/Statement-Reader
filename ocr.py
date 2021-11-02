@@ -17,8 +17,6 @@ def show_boxes(image_data, filename):
 	for i in range(0,len(image_data['line_num'])):
 		(x, y, w, h) = (image_data['left'][i], image_data['top'][i], image_data['width'][i], image_data['height'][i])
 		cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
-	cv2.imshow('Results',image)
-	cv2.waitKey(0)
 	boxes = str(os.path.abspath(os.path.dirname( __file__ ))+"\{}.png").format(os.getpid()+1)
 	cv2.imwrite(boxes, image)
 	return
@@ -58,7 +56,7 @@ def left_rule(data):
 		text = data[i]['text']
 		try:
 			text = int(text)
-			if(text>=1969 and text<=2022):
+			if(text>=1969 and text<=2023):
 				continue
 		except:
 			pass
@@ -122,7 +120,7 @@ def detect_gaps(data):
 	return sorted(results, key = lambda num: num, reverse=False)
 
 def get_column_names(data, num_cols, high_top):
-	left_thresh = 150
+	left_thresh = 100
 	front,back = [],[]
 	for i in data:
 		try:
@@ -130,6 +128,7 @@ def get_column_names(data, num_cols, high_top):
 				front.append(i)
 		except:
 			back.append(i)
+	print("high top")
 	data = front+back
 	for i in data:
 		if(int(i['top'])<high_top):
@@ -140,7 +139,7 @@ def get_column_names(data, num_cols, high_top):
 			if(count<(num_cols+2)):
 				for j in data: 
 					if(int(j['top'])<high_top):
-						if(i['text']!=j['text']):
+						if((int(i['top'])+int(i['left'])+int(i['width']))!=(int(j['top'])+int(j['left'])+int(j['width']))):
 							if(top==int(j['top']) and (left+left_thresh)<int(j['left'])):
 								row.append(j)
 								left = int(j['left'])
@@ -158,29 +157,15 @@ def fix_image_lines(image_lines):
 	for i in range(0,len(image_lines)):
 		for j in range(0,len(image_lines[i])):
 			temp_list[image_lines[i][j]['line_num']].append(image_lines[i][j])
-	return_list = []
-	for i in range(0,len(temp_list)):
-		first_half = [] #anchor the first word to ensure lines are constant
-		second_half = []
-		for j in [k for k in temp_list[i] if len(k)>0]:
-			if(j['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").replace("-","").replace("0.","").strip().lower().isdigit()):
-				second_half.append(j)
-			else:
-				first_half.append(j)
-		return_list.append(first_half+second_half)
-	return return_list
+	return temp_list
 
 def save_image_data(image_data):
 	'''save cleaned data from OCR program
 	'''
-	pattern = re.compile(r'[A-Z][0-9]')
 	columns = ['text','line_num','left','top','width','height']
 	data_dict = {i:[] for i in columns}
 	for i in range(0,len(image_data['text'])):
 		if(image_data['text'][i] not in ('',' ',None,'$','§')):
-			if(len(pattern.findall(image_data['text'][i]))>0):
-				print("TRIGGERED!!")
-				print(image_data['text'][i])
 			image_data['text'][i] = image_data['text'][i].replace("A4","4").replace("G4","34").replace("G6","36")
 			if(len(image_data['text'][i].strip())>1):
 				if("." in image_data['text'][i] and image_data['text'][i].replace("(","").replace(")","").replace("0.","").replace(".","").replace(",","").strip().isdigit()):
@@ -383,7 +368,6 @@ def group_by_columns(image_lines, num_cols, num_rows, columns):
 	for i in range(0,69):
 		data, passed, isolated = isolate_whitespace(data, num_rows, isolated)
 		if(passed==0):
-			print("Passed isolate_whitespace on run #" + str(i))
 			break
 	isolated = sorted(isolated, key = lambda row: int(row['top']), reverse=False)
 	if(len(isolated)>0):
@@ -458,12 +442,13 @@ def group_by_columns(image_lines, num_cols, num_rows, columns):
 	# bring in column names
 	data = run_SQL("select * from image_data_10 order by cast(top as 'decimal') asc, cast(left as 'decimal');")	
 	if(len(columns)==0):
-		garbage = run_SQL("select * from garbage order by cast(top as 'decimal');")
+		garbage = run_SQL("select * from garbage order by cast(top as 'decimal'), cast(left as 'decimal');")
 		columns = get_column_names(garbage, num_cols, int(high_top))
 	if(len(columns)==0):
 		columns = [i['text'] for i in data[0:num_cols]]
 		data = data[num_cols:]
 	print("_______________Final Column Defs_______________")
+	print(num_cols)
 	print(columns)
 	print("_______________________________________________")
 	for i in range(0,len(data)):
@@ -512,17 +497,13 @@ def scrape_financials(image_data, page_num):
 	max_line_num = len(image_lines)-1
 	for i in range(0,len(image_lines[-1])):
 		image_lines[-1][i]['line_num'] = max_line_num
-	for i in range(0,len(image_lines)):
-		image_lines[i] = [k for k in image_lines[i] if k['text'].strip()!=""]
 
 	# group data into lines, sort left to right
 	for i in range(0,100):	
 		image_lines, passed = group_by_lines(image_lines)
 		image_lines = fix_image_lines(image_lines)
 		if(passed==0):
-			print("___ Passed image lines sort on run #" + str(i))
 			break
-	time_a = time.time()
 	for i in range(0,len(image_lines)):
 		image_lines[i] = sorted(image_lines[i], key = lambda var: var['left'])
 
@@ -566,9 +547,8 @@ def scrape_financials(image_data, page_num):
 
 #============================ START OF MAIN LOGIC ============================#
 Tk().withdraw()
-filename = filedialog.askopenfilename()
+filename = filedialog.askopenfilename() #filename = 'C:\\Users\\micha\\Desktop\\financial statement reader\\test - Tesla\\e9f7bb6a-f6b7-4b3d-beec-afdcb2f9e644-4.ppm' #manual for testing
 start_time = time.time()
-#filename = 'C:\\Users\\micha\\Desktop\\financial statement reader\\test - Tesla\\e9f7bb6a-f6b7-4b3d-beec-afdcb2f9e644-4.ppm' #manual for testing
 
 # if it's a PDF, convert to image first
 try:
@@ -590,7 +570,6 @@ for page_num in range(0,len(images)):
 	image_data, image = get_image_data(img)
 	print("Time taken to get image data from OCR: " + str(round(time.time()-time_a,2)) + " seconds!")
 	#show_boxes(image_data, image)
-	#os.remove(image) 
 	#import sys
 	#sys.exit(0)
 	os.remove(image)
