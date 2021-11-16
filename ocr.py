@@ -139,35 +139,6 @@ def detect_gaps(data):
 				results.append(int((int(lefts[i+1])-int(lefts[i]))/2 + int(lefts[i])))
 	return sorted(results, key = lambda num: num, reverse=False)
 
-def get_column_names(data, num_cols, high_top):
-	left_thresh = 100
-	front,back = [],[]
-	for i in data:
-		try:
-			if(int(i['text'].strip())>1969 and int(i['text'].strip())<2023):
-				front.append(i)
-		except:
-			back.append(i)
-	print("high top")
-	data = front+back
-	for i in data:
-		if(int(i['top'])<high_top):
-			top = int(i['top'])
-			left = int(i['left'])
-			row = [i]
-			count = len([k for k in data if int(k['top'])>=top-5 and int(k['top'])<=top+5])
-			if(count<(num_cols+2)):
-				for j in data: 
-					if(int(j['top'])<high_top):
-						if((int(i['top'])+int(i['left'])+int(i['width']))!=(int(j['top'])+int(j['left'])+int(j['width']))):
-							if(top==int(j['top']) and (left+left_thresh)<int(j['left'])):
-								row.append(j)
-								left = int(j['left'])
-		if len(row)==num_cols:
-			columns = [k['text'].strip() for k in row]
-			return columns
-	return []
-
 def fix_image_lines(image_lines):
 	'''part 2 of algorithm, fix data structure to force Python line index to equal line_num
 	   		-- force digits to be after words (TODO: flawed logic, should be ordered left to right)
@@ -238,50 +209,7 @@ def clean_numbers(data):
 	return data
 
 def detect_dates(data, num_cols):
-	calendar_months = ['january','february','march','april','may','june','july','august','september','october','november','december']
-	data = sorted(data, key=lambda row: int(row['top']))
-	top_thresh=4
-	for i in range(1,len(data)):
-		if(int(data[i]['top'])<int(data[i-1]['top'])+top_thresh):
-			data[i]['top'] = data[i-1]['top']
-	data = sorted(data, key=lambda row: (int(row['top']), int(row['left'])))
-	new_data = []
-	top = data[0]['top']
-	temp_list = []
-	for i in data:
-		if(int(i['top'])!=top):
-			new_data.append(temp_list)
-			top = int(i['top'])
-			temp_list = [i]
-		else:
-			temp_list.append(i)
-	for i in range(0,len(new_data)):
-		possible_dates = []
-		for j in range(0,len(new_data[i])):
-			passed = 0
-			for month in calendar_months:
-				if(SequenceMatcher(None, new_data[i][j]['text'].lower(), month).ratio()>=.80):
-					new_data[i][j]['text'] = month
-					passed = 1
-					break
-			if(passed==1):
-				try:
-					if(new_data[i][j+1]['text'].strip().replace(",","").isdigit() and new_data[i][j+2]['text'].strip().replace(",","").isdigit()):
-						possible_dates.append([new_data[i][j], new_data[i][j+1], new_data[i][j+2]])
-					else:
-						raise Exception("Skip to next try...")
-				except:
-					try:
-						if(new_data[i][j+1]['text'].strip().replace(",","").isdigit()):
-							possible_dates.append([new_data[i][j], new_data[i][j+1]])
-						else:
-							possible_dates.append([new_data[i][j]])
-					except:
-						possible_dates.append([new_data[i][j]])
-		if(len(possible_dates)==num_cols):
-			break
-	if(len(possible_dates)!=num_cols):
-		return None
+	"""
 	entertain_data = [i for i in new_data if int(i[0]['top'])>int(possible_dates[0][0]['top']) and int(i[0]['top'])<=int(possible_dates[0][0]['top'])+50]
 	entertain_data = [item for sublist in entertain_data for item in sublist]
 	if(len(possible_dates)==num_cols):
@@ -300,7 +228,91 @@ def detect_dates(data, num_cols):
 	if(len(possible_dates)==num_cols):
 		return possible_dates
 	else:
-		return None
+		return None"""
+	pass
+
+def get_column_names(data, num_cols, high_top):
+	calendar_months = ['january','february','march','april','may','june','july','august','september','october','november','december']
+	left_thresh = 100
+	top_thresh=4
+	front,back = [],[]
+	for i in range(1,len(data)):
+		if(int(data[i]['top'])<int(data[i-1]['top'])+top_thresh): 
+			data[i]['top'] = data[i-1]['top']
+	data = sorted(data, key=lambda row: (int(row['top']), int(row['left'])))
+	for i in range(0,len(data)):
+		passed = 0
+		possible_dates = []
+		for month in calendar_months:
+			if(SequenceMatcher(None, data[i]['text'].lower(), month).ratio()>=.80):
+				data[i]['text'] = month
+				passed = 1
+				break
+		if(passed==1):
+			try:
+				if(data[i+1]['text'].strip().replace(",","").isdigit() and data[i+2]['text'].strip().replace(",","").isdigit()):
+					possible_dates.append([data[i], data[i+1], data[i+2]])
+				else:
+					raise Exception("Skip to next try...")
+			except:
+				try:
+					if(data[i+1]['text'].strip().replace(",","").isdigit()):
+						possible_dates.append([data[i], data[i+1]])
+					else:
+						possible_dates.append([data[i]])
+				except:
+					possible_dates.append([data[i]])
+		print(possible_dates)
+		if(len(possible_dates)==num_cols):
+			entertain_data = [i for i in data if int(i['top'])>int(possible_dates[0][0]['top']) and int(i['top'])<=int(possible_dates[0][0]['top'])+50]
+			entertain_data = [item for sublist in entertain_data for item in sublist]
+			if(len(possible_dates)==num_cols):
+				if(len(possible_dates[0])==2):
+					for i in range(0,len(possible_dates)):
+						surface_1 = [int(possible_dates[i][0]['left']), int(possible_dates[i][-1]['left'])+int(possible_dates[i][-1]['width'])]
+						for j in range(0,len(entertain_data)):
+							surface_2 = [int(entertain_data[j]['left']), int(entertain_data[j]['left'])+int(entertain_data[j]['width'])]
+							if((surface_2[0]>=surface_1[0] and surface_2[0]<=surface_1[1]) or (surface_1[0]>=surface_2[0] and surface_1[0]<=surface_2[1])):
+								try:
+									number_below = int(entertain_data[j]['text'].strip().replace(",",""))
+									if(number_below>=1969 and number_below<=2022):
+										possible_dates[i].append(entertain_data[j])
+								except:
+									pass
+
+	if(len(possible_dates)==num_cols):
+		columns = []
+		for i in possible_dates:
+			column = " ".join([j['text'] for j in i])
+			columns.append(column)
+		return columns
+
+	for i in data:
+		try:
+			if(int(i['text'].strip())>1969 and int(i['text'].strip())<2023):
+				front.append(i)
+		except:
+			back.append(i)
+	data = front+back
+	for i in data:
+		if(int(i['top'])<high_top):
+			top = int(i['top'])
+			left = int(i['left'])
+			row = [i]
+			count = len([k for k in data if int(k['top'])>=top-5 and int(k['top'])<=top+5])
+			print(count)
+			if(count<(num_cols+2)):
+				for j in data:
+					if(int(j['top'])<high_top):
+						if((int(i['top'])+int(i['left'])+int(i['width']))!=(int(j['top'])+int(j['left'])+int(j['width']))):
+							if(top==int(j['top']) and (left+left_thresh)<int(j['left'])):
+								row.append(j)
+								left = int(j['left'])
+		if len(row)==num_cols:
+			columns = [k['text'].strip() for k in row]
+			return columns
+	return []
+
 
 def scrape_financials(image_data, page_num):
 	'''scrapes financial data from chosen set of images
@@ -362,14 +374,14 @@ def scrape_financials(image_data, page_num):
 	num_cols = most_frequent([len(i['values']) for i in image_lines if len(i['values'])>0])
 	num_rows = len(image_lines)
 	print(str(num_rows) + " rows and " + str(num_cols) + " columns being initialized:")
-	potential_dates = detect_dates(top_data, num_cols)
-	columns = []
-	if(potential_dates):
-		for row in potential_dates:
-			print(" ".join([i['text'] for i in row]))
-		for i in potential_dates:
-			column = " ".join([j['text'] for j in i])
-			columns.append(column)
+	#potential_dates = detect_dates(top_data, num_cols)
+	#columns = []
+	#if(potential_dates):
+	#	for row in potential_dates:
+	#		print(" ".join([i['text'] for i in row]))
+	#	for i in potential_dates:
+	#		column = " ".join([j['text'] for j in i])
+	#		columns.append(column)
 
 	# bring in page number and line number
 	SQL = """drop table if exists image_data_1;"""
@@ -526,9 +538,8 @@ def scrape_financials(image_data, page_num):
 
 	# bring in column names
 	data = run_SQL("select * from image_data_10 order by cast(top as 'decimal') asc, cast(left as 'decimal');")	
-	if(len(columns)==0):
-		garbage = run_SQL("select * from garbage order by cast(top as 'decimal'), cast(left as 'decimal');")
-		columns = get_column_names(garbage, num_cols, int(high_top))
+	garbage = run_SQL("select * from garbage order by cast(top as 'decimal'), cast(left as 'decimal');")
+	columns = get_column_names(garbage, num_cols, int(high_top))
 	if(len(columns)==0):
 		columns = [i['text'] for i in data[0:num_cols]]
 		data = data[num_cols:]
