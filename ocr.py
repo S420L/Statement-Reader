@@ -30,6 +30,27 @@ def pdf_to_image(filename):
 		filenames = [i.filename for i in images_from_path]
 		return filenames
 
+def output_results():
+	'''transform most recently scraped data into traditional spread format
+	'''
+	SQL = "select distinct col_num, column from financials;"
+	data = run_SQL(SQL)
+	col_nums = sorted(list(set([i['col_num'] for i in data])))
+	case_sql = ""
+	for col_num in col_nums:
+		column = str([i['column'] for i in data if i['col_num']==col_num][0])
+		case_sql += """, sum(case when col_num="""+str(col_num)+""" then value end) as '"""+column+"""' \n"""
+	SQL = """
+		select * from (
+		select distinct page_num, line_num, variable
+		"""	+ case_sql + """
+		from financials
+		group by page_num, line_num, variable
+		order by cast(page_num as 'decimal'), cast(line_num as 'decimal'));
+		"""
+	data = list_to_dict(run_SQL(SQL))
+	send_to_excel(os.path.dirname(__file__),data,"Financial Statement Output",clear_indic='y',headings='y')
+
 def group_by_lines(image_lines):
 	'''Iterative algorithm: 
 		-- if an element is too close to the top of the page to be in its line_num then move down one level
@@ -81,7 +102,6 @@ def left_rule(data):
 			return data, passed
 		else:
 			continue
-
 	return data, passed
 
 def implement_left_rule(data):
@@ -282,9 +302,74 @@ def detect_dates(data, num_cols):
 	else:
 		return None
 
-def group_by_columns(image_lines, num_cols, num_rows, columns):
-	'''12 step process to turn raw data into table of numbers
+def scrape_financials(image_data, page_num):
+	'''scrapes financial data from chosen set of images
 	'''
+	save_image_data(image_data) #throw into SQL
+	SQL = """select * from image_data where text<>'' and text is not null and text<>' ';"""
+	image_data = list_to_dict(clean_numbers(run_SQL(SQL)))
+	# start of my hairbrained image_lines scheme
+	image_lines = [[{key: image_data[key][0] for key in ('text','top','left','width')}]]
+	image_lines[0][0]['line_num'] = 0
+	tack_on = []
+	line_num = 1
+	for i in range(0,len(image_data['text'])):
+		if image_data['left'][i]<300: # define how far out the start of a line can be
+			if(image_data['top'][i]>image_lines[len(image_lines)-1][0]['top']+5):
+				line = {key: image_data[key][i] for key in ('text','top','left','width','line_num')}
+				line['line_num'] = line_num
+				line_num+=1
+				image_lines.append([line])
+			else:
+				tack_on.append({key: image_data[key][i] for key in ('text','top','left','width','line_num')})
+		else:
+			tack_on.append({key: image_data[key][i] for key in ('text','top','left','width','line_num')})
+	tack_on = sorted(tack_on, key = lambda num: num['top'], reverse=True)
+	for i in tack_on:
+		image_lines[-1].append(i)
+	max_line_num = len(image_lines)-1
+	for i in range(0,len(image_lines[-1])):
+		image_lines[-1][i]['line_num'] = max_line_num
+
+	# group data into lines, sort left to right
+	for i in range(0,100):	
+		image_lines, passed = group_by_lines(image_lines)
+		image_lines = fix_image_lines(image_lines)
+		if(passed==0):
+			break
+	for i in range(0,len(image_lines)):
+		image_lines[i] = sorted(image_lines[i], key = lambda var: var['left'])
+
+	top_data = image_lines[0]+image_lines[1]
+
+	for i in range(0,len(image_lines)):
+		top_list = [k['top'] for k in image_lines[i]]
+		top_range = [min(top_list),max(top_list)]
+		image_lines[i] = {'text': [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").strip().lower())>0],
+							'top': top_range, 'page_num': str(page_num+1)}
+
+	for i in range(0,len(image_lines)):
+		values = []
+		variable = ""
+		for j in image_lines[i]['text']:
+			if(j.replace(b'\xe2\x80\x94'.decode('utf-8'),"").replace("0.","").replace(".","").replace("-","").strip().isdigit()):
+				values.append(j)
+			else:
+				variable += " " + str(j)
+		image_lines[i]['variable'] = variable.replace("\"","").replace("§","")
+		image_lines[i]['values'] = values
+		
+	num_cols = most_frequent([len(i['values']) for i in image_lines if len(i['values'])>0])
+	num_rows = len(image_lines)
+	print(str(num_rows) + " rows and " + str(num_cols) + " columns being initialized:")
+	potential_dates = detect_dates(top_data, num_cols)
+	columns = []
+	if(potential_dates):
+		for row in potential_dates:
+			print(" ".join([i['text'] for i in row]))
+		for i in potential_dates:
+			column = " ".join([j['text'] for j in i])
+			columns.append(column)
 
 	# bring in page number and line number
 	SQL = """drop table if exists image_data_1;"""
@@ -447,10 +532,7 @@ def group_by_columns(image_lines, num_cols, num_rows, columns):
 	if(len(columns)==0):
 		columns = [i['text'] for i in data[0:num_cols]]
 		data = data[num_cols:]
-	print("_______________Final Column Defs_______________")
-	print(num_cols)
-	print(columns)
-	print("_______________________________________________")
+	print("_______________Final Column Defs: " + ", ".join(columns) + " _______________")
 	for i in range(0,len(data)):
 		data[i]['column'] = columns[(int(data[i]['col_num'])-1)]
 	data = clean_numbers(data)
@@ -468,77 +550,6 @@ def group_by_columns(image_lines, num_cols, num_rows, columns):
 		from image_data_11;
 		"""
 	run_SQL(SQL, commit_indic='y')
-
-def scrape_financials(image_data, page_num):
-	'''scrapes financial data from chosen set of images
-	'''
-	save_image_data(image_data) #throw into SQL
-	SQL = """select * from image_data where text<>'' and text is not null and text<>' ';"""
-	image_data = list_to_dict(clean_numbers(run_SQL(SQL)))
-	# start of my hairbrained image_lines scheme
-	image_lines = [[{key: image_data[key][0] for key in ('text','top','left','width')}]]
-	image_lines[0][0]['line_num'] = 0
-	tack_on = []
-	line_num = 1
-	for i in range(0,len(image_data['text'])):
-		if image_data['left'][i]<300: # define how far out the start of a line can be
-			if(image_data['top'][i]>image_lines[len(image_lines)-1][0]['top']+5):
-				line = {key: image_data[key][i] for key in ('text','top','left','width','line_num')}
-				line['line_num'] = line_num
-				line_num+=1
-				image_lines.append([line])
-			else:
-				tack_on.append({key: image_data[key][i] for key in ('text','top','left','width','line_num')})
-		else:
-			tack_on.append({key: image_data[key][i] for key in ('text','top','left','width','line_num')})
-	tack_on = sorted(tack_on, key = lambda num: num['top'], reverse=True)
-	for i in tack_on:
-		image_lines[-1].append(i)
-	max_line_num = len(image_lines)-1
-	for i in range(0,len(image_lines[-1])):
-		image_lines[-1][i]['line_num'] = max_line_num
-
-	# group data into lines, sort left to right
-	for i in range(0,100):	
-		image_lines, passed = group_by_lines(image_lines)
-		image_lines = fix_image_lines(image_lines)
-		if(passed==0):
-			break
-	for i in range(0,len(image_lines)):
-		image_lines[i] = sorted(image_lines[i], key = lambda var: var['left'])
-
-	top_data = image_lines[0]+image_lines[1]
-
-	for i in range(0,len(image_lines)):
-		top_list = [k['top'] for k in image_lines[i]]
-		top_range = [min(top_list),max(top_list)]
-		image_lines[i] = {'text': [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").strip().lower())>0],
-							'top': top_range, 'page_num': str(page_num+1)}
-
-	for i in range(0,len(image_lines)):
-		values = []
-		variable = ""
-		for j in image_lines[i]['text']:
-			if(j.replace(b'\xe2\x80\x94'.decode('utf-8'),"").replace("0.","").replace(".","").replace("-","").strip().isdigit()):
-				values.append(j)
-			else:
-				variable += " " + str(j)
-		image_lines[i]['variable'] = variable.replace("\"","").replace("§","")
-		image_lines[i]['values'] = values
-		
-	num_cols = most_frequent([len(i['values']) for i in image_lines if len(i['values'])>0])
-	num_rows = len(image_lines)
-	print(str(num_rows) + " rows and " + str(num_cols) + " columns being initialized:")
-	potential_dates = detect_dates(top_data, num_cols)
-	columns = []
-	if(potential_dates):
-		for row in potential_dates:
-			print(" ".join([i['text'] for i in row]))
-		for i in potential_dates:
-			column = " ".join([j['text'] for j in i])
-			columns.append(column)
-
-	group_by_columns(image_lines, num_cols, num_rows, columns)
 	SQL = """
 	insert into financials
 	select * from image_data_12;
@@ -577,28 +588,6 @@ for page_num in range(0,len(images)):
 		os.remove(old_image)
 	scrape_financials(image_data, page_num)
 
-def output_to_excel():
-	'''transform most recently scraped data into traditional spread format
-	'''
-	SQL = "select distinct col_num, column from financials;"
-	data = run_SQL(SQL)
-	col_nums = sorted(list(set([i['col_num'] for i in data])))
-	case_sql = ""
-	for col_num in col_nums:
-		column = str([i['column'] for i in data if i['col_num']==col_num][0])
-		case_sql += """, sum(case when col_num="""+str(col_num)+""" then value end) as '"""+column+"""' \n"""
-	SQL = """
-		select * from (
-		select distinct page_num, line_num, variable
-		"""	+ case_sql + """
-		from financials
-		group by page_num, line_num, variable
-		order by cast(page_num as 'decimal'), cast(line_num as 'decimal'));
-		"""
-	data = list_to_dict(run_SQL(SQL))
-	send_to_excel(os.path.dirname(__file__),data,"Financial Statement Output",clear_indic='y',headings='y')
-
-output_to_excel()
-
+output_results()
 print("finished running in: " + str(time.time()-start_time) + " seconds")
 

@@ -36,7 +36,7 @@ def dict_to_sqlite(box_dict, table_name, database=str(os.path.abspath(os.path.di
 		conn.commit()
 	conn.close()
 
-def update_in_table(table, update_column, value, conditional):
+def update_in_table(table, update_column, value, conditional, print_indic=False):
 	'''arbitrarily update stuff in the database
 	'''
 	if value is not None:
@@ -47,7 +47,8 @@ def update_in_table(table, update_column, value, conditional):
 		update """ + table + """
 		set """ + update_column + """ = """ + value + """
 		""" + """ """ + conditional + """;"""
-	print(SQL)
+	if(print_indic):
+		print(SQL)
 	run_SQL(SQL,'y')
 
 def run_SQL(SQL, commit_indic='n', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db")):
