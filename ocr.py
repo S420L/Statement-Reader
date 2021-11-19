@@ -8,7 +8,7 @@ from tkinter import Tk, filedialog
 from difflib import SequenceMatcher
 from pdf2image import convert_from_path
 from pytesseract import Output, image_to_data
-from tricks import (dict_to_sqlite, update_in_table, list_to_dict, most_frequent, run_SQL, send_to_excel)
+from tricks import (dict_to_sqlite, update_in_table, list_to_dict, most_frequent, run_SQL, send_to_excel, format_SQL)
 
 def show_boxes(image_data, filename):
 	'''function for showing borders around words (visualize the data from image_to_data)
@@ -25,7 +25,7 @@ def pdf_to_image(filename):
 	'''OCR only works on images, so convert all pdfs to a list of images
 	'''
 	with tempfile.TemporaryDirectory() as path:
-		images_from_path = convert_from_path(filename, output_folder=str(os.path.abspath(os.path.dirname(__file__))+"\\temp"))
+		images_from_path = convert_from_path(filename, output_folder=str(os.path.abspath(os.path.dirname(__file__))+"/temp"))
 		print('running for image: ' + str(images_from_path))
 		filenames = [i.filename for i in images_from_path]
 		return filenames
@@ -48,6 +48,7 @@ def output_results():
 		group by page_num, line_num, variable
 		order by cast(page_num as 'decimal'), cast(line_num as 'decimal'));
 		"""
+	print(format_SQL(SQL))
 	data = list_to_dict(run_SQL(SQL))
 	send_to_excel(os.path.dirname(__file__),data,"Financial Statement Output",clear_indic='y',headings='y')
 
@@ -188,7 +189,7 @@ def preprocess_image(filename):
 	return img
 
 def get_image_data(img):
-	filename = str(os.path.abspath(os.path.dirname( __file__ ))+"\\temp\{}.png").format(os.getpid())
+	filename = str(os.path.abspath(os.path.dirname( __file__ ))+"/temp/{}.png").format(os.getpid())
 	cv2.imwrite(filename, img)
 	image_data = image_to_data(filename, config='--psm 11', output_type = Output.DICT)
 	return image_data, filename
@@ -208,29 +209,6 @@ def clean_numbers(data):
 		data[i]['width'] = int(data[i]['width'])
 	return data
 
-def detect_dates(data, num_cols):
-	"""
-	entertain_data = [i for i in new_data if int(i[0]['top'])>int(possible_dates[0][0]['top']) and int(i[0]['top'])<=int(possible_dates[0][0]['top'])+50]
-	entertain_data = [item for sublist in entertain_data for item in sublist]
-	if(len(possible_dates)==num_cols):
-		if(len(possible_dates[0])==2):
-			for i in range(0,len(possible_dates)):
-				surface_1 = [int(possible_dates[i][0]['left']), int(possible_dates[i][-1]['left'])+int(possible_dates[i][-1]['width'])]
-				for j in range(0,len(entertain_data)):
-					surface_2 = [int(entertain_data[j]['left']), int(entertain_data[j]['left'])+int(entertain_data[j]['width'])]
-					if((surface_2[0]>=surface_1[0] and surface_2[0]<=surface_1[1]) or (surface_1[0]>=surface_2[0] and surface_1[0]<=surface_2[1])):
-						try:
-							number_below = int(entertain_data[j]['text'].strip().replace(",",""))
-							if(number_below>=1969 and number_below<=2022):
-								possible_dates[i].append(entertain_data[j])
-						except:
-							pass
-	if(len(possible_dates)==num_cols):
-		return possible_dates
-	else:
-		return None"""
-	pass
-
 def get_column_names(data, num_cols, high_top):
 	calendar_months = ['january','february','march','april','may','june','july','august','september','october','november','december']
 	left_thresh = 100
@@ -240,9 +218,9 @@ def get_column_names(data, num_cols, high_top):
 		if(int(data[i]['top'])<int(data[i-1]['top'])+top_thresh): 
 			data[i]['top'] = data[i-1]['top']
 	data = sorted(data, key=lambda row: (int(row['top']), int(row['left'])))
+	possible_dates = []
 	for i in range(0,len(data)):
 		passed = 0
-		possible_dates = []
 		for month in calendar_months:
 			if(SequenceMatcher(None, data[i]['text'].lower(), month).ratio()>=.80):
 				data[i]['text'] = month
@@ -250,7 +228,7 @@ def get_column_names(data, num_cols, high_top):
 				break
 		if(passed==1):
 			try:
-				if(data[i+1]['text'].strip().replace(",","").isdigit() and data[i+2]['text'].strip().replace(",","").isdigit()):
+				if(data[i+1]['text'].strip().replace(",","").replace(".","").isdigit() and data[i+2]['text'].strip().replace(",","").replace(".","").isdigit()):
 					possible_dates.append([data[i], data[i+1], data[i+2]])
 				else:
 					raise Exception("Skip to next try...")
@@ -262,8 +240,8 @@ def get_column_names(data, num_cols, high_top):
 						possible_dates.append([data[i]])
 				except:
 					possible_dates.append([data[i]])
-		print(possible_dates)
 		if(len(possible_dates)==num_cols):
+			print(possible_dates)
 			entertain_data = [i for i in data if int(i['top'])>int(possible_dates[0][0]['top']) and int(i['top'])<=int(possible_dates[0][0]['top'])+50]
 			entertain_data = [item for sublist in entertain_data for item in sublist]
 			if(len(possible_dates)==num_cols):
@@ -279,13 +257,11 @@ def get_column_names(data, num_cols, high_top):
 										possible_dates[i].append(entertain_data[j])
 								except:
 									pass
-
-	if(len(possible_dates)==num_cols):
-		columns = []
-		for i in possible_dates:
-			column = " ".join([j['text'] for j in i])
-			columns.append(column)
-		return columns
+				columns = []
+				for i in possible_dates:
+					column = " ".join([j['text'] for j in i])
+					columns.append(column)
+				return columns
 
 	for i in data:
 		try:
@@ -300,7 +276,6 @@ def get_column_names(data, num_cols, high_top):
 			left = int(i['left'])
 			row = [i]
 			count = len([k for k in data if int(k['top'])>=top-5 and int(k['top'])<=top+5])
-			print(count)
 			if(count<(num_cols+2)):
 				for j in data:
 					if(int(j['top'])<high_top):
@@ -312,7 +287,6 @@ def get_column_names(data, num_cols, high_top):
 			columns = [k['text'].strip() for k in row]
 			return columns
 	return []
-
 
 def scrape_financials(image_data, page_num):
 	'''scrapes financial data from chosen set of images
@@ -374,14 +348,6 @@ def scrape_financials(image_data, page_num):
 	num_cols = most_frequent([len(i['values']) for i in image_lines if len(i['values'])>0])
 	num_rows = len(image_lines)
 	print(str(num_rows) + " rows and " + str(num_cols) + " columns being initialized:")
-	#potential_dates = detect_dates(top_data, num_cols)
-	#columns = []
-	#if(potential_dates):
-	#	for row in potential_dates:
-	#		print(" ".join([i['text'] for i in row]))
-	#	for i in potential_dates:
-	#		column = " ".join([j['text'] for j in i])
-	#		columns.append(column)
 
 	# bring in page number and line number
 	SQL = """drop table if exists image_data_1;"""

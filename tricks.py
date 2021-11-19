@@ -122,3 +122,45 @@ def list_to_dict(data_list):
 		for j in keys:
 			data_dict[j].append(data_list[i][j])
 	return data_dict
+
+def format_SQL(SQL):
+    SQL = " ".join(SQL.splitlines())
+    SQL = " ".join([i.strip().lower() for i in SQL.split() if len(i)>0])
+    SQL = [str(i.strip().lower()) for i in SQL.split()]
+    for i in range(0,len(SQL)):
+        if SQL[i]=='union':
+            SQL[i] = '\nunion\n'
+        elif SQL[i]=='from':
+            SQL[i] = '\nfrom'
+        elif SQL[i]=='join':
+            SQL[i+2] = SQL[i+2]+"\n"
+        elif SQL[i]=='inner':
+            SQL[i] = '\ninner'
+        elif SQL[i]=='outer':
+            SQL[i] = '\nouter'
+        elif SQL[i]=='from':
+            SQL[i] = '\nfrom'
+        elif SQL[i]=='select':
+            SQL[i] = '\nselect'
+        elif SQL[i]=='(select':
+            SQL[i] = '\n(select'
+        elif SQL[i]=='where':
+            SQL[i] = '\nwhere'
+        elif SQL[i]=='group':
+            SQL[i] =  "\ngroup"
+        elif SQL[i]=='order':
+            SQL[i] = "\norder"
+        elif SQL[i]=='and':
+            SQL[i] = '\nand'
+        elif SQL[i]=='on':
+            SQL[i] = '\non'
+    for i in range(0,len(SQL)):
+        if(i<len(SQL)-2):
+            if (SQL[i].strip().lower()=='from' and SQL[i+1].strip().lower()=='(' and SQL[i+2].strip().lower() == 'select') or (SQL[i].strip().lower()=='from' and SQL[i+1].strip().lower()=='(select'):
+                SQL[i] = '\nfrom'
+                SQL[i+1] = '(select'
+                SQL[i+2] = ''
+    SQL = " ".join(SQL)
+    SQL = os.linesep.join([s for s in SQL.splitlines() if s.strip()])
+    SQL = SQL.replace(") )","))")
+    return SQL
