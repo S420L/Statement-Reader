@@ -213,34 +213,37 @@ def clean_numbers(data):
 		elif(data[i]['text'].strip()[0]=="(" and data[i]['text'].strip()[-1]==")"):
 			if(data[i]['text'].replace("(","").replace(")","").replace("0.","").replace(".","").replace(",","").strip().isdigit()):
 				data[i]['text'] = str("—" + data[i]['text'][1:-1])
-		data[i]['top'] = int(data[i]['top'])
-		data[i]['left'] = int(data[i]['left'])
-		data[i]['width'] = int(data[i]['width'])
+		data[i]['top'], data[i]['left'], data[i]['width'] = int(data[i]['top']), int(data[i]['left']), int(data[i]['width'])
 	return data
 
 def get_column_names(data, num_cols, high_top):
 	calendar_months = ['january','february','march','april','may','june','july','august','september','october','november','december']
+	quarterly_markers = ['three months ended', 'nine months ended', 'twelve months ended', '3 months ended', '9 months ended', '12 months ended']
 	left_thresh = 100
 	front,back = [],[]
 	possible_dates = []
 	for i in range(0,len(data)):
 		passed = 0
 		for month in calendar_months:
-			if(SequenceMatcher(None, data[i]['text'].lower(), month).ratio()>=.80):
+			if(SequenceMatcher(None, data[i]['text'].lower(), month).ratio()>=.69):
 				data[i]['text'] = month
 				passed = 1
 				break
 		if(passed==1):
 			try:
-				one_out = data[i+1]['text'].strip().replace(",","").replace(".","")
-				two_out = data[i+2]['text'].strip().replace(",","").replace(".","")
-				three_out = data[i+3]['text'].strip().replace(",","").replace(".","")
+				one_out, two_out, three_out = data[i+1]['text'].strip().replace(",","").replace(".",""), data[i+2]['text'].strip().replace(",","").replace(".",""), data[i+3]['text'].strip().replace(",","").replace(".","")
 				try:
 					four_out = str(int(data[i+4]['text'].strip().replace(",","").replace(".","")))
 				except:
 					four_out = "420"
-				if(one_out.isdigit() and two_out.isdigit() and three_out.isdigit() and four_out.isdigit()):
-					if((int(two_out)>=1969 and int(two_out)<=2022) and (int(three_out)>=1969 and int(three_out)<=2022) and (int(four_out)>=1969 and int(four_out)<=2022)):
+				try:
+					five_out = str(int(data[i+5]['text'].strip().replace(",","").replace(".","")))
+				except:
+					five_out = "420"
+				if(one_out.isdigit() and two_out.isdigit() and three_out.isdigit() and four_out.isdigit() and five_out.isdigit()):
+					if((int(two_out)>=1969 and int(two_out)<=2022) and (int(three_out)>=1969 and int(three_out)<=2022) and (int(four_out)>=1969 and int(four_out)<=2022) and (int(five_out)>=1969 and int(five_out)<=2022)):
+						possible_dates = [[data[i], data[i+1], data[i+2]],[data[i], data[i+1], data[i+3]],[data[i], data[i+1], data[i+4]], [data[i], data[i+1], data[i+5]]]
+					elif((int(two_out)>=1969 and int(two_out)<=2022) and (int(three_out)>=1969 and int(three_out)<=2022) and (int(four_out)>=1969 and int(four_out)<=2022)):
 						possible_dates = [[data[i], data[i+1], data[i+2]],[data[i], data[i+1], data[i+3]],[data[i], data[i+1], data[i+4]]]
 					elif((int(two_out)>=1969 and int(two_out)<=2022) and (int(three_out)>=1969 and int(three_out)<=2022)):
 						possible_dates = [[data[i], data[i+1], data[i+2]],[data[i], data[i+1], data[i+3]]]
@@ -249,40 +252,46 @@ def get_column_names(data, num_cols, high_top):
 				else:
 					raise Exception("Skip to next try...")
 			except:
-				try:
-					one_out = data[i+1]['text'].strip().replace(",","").replace(".","")
-					if(one_out.isdigit()):
-						possible_dates.append([data[i], data[i+1]])
-						print(i)
-				except:
-					pass
+				pass
 		if(len(possible_dates)==num_cols):
-			return [" ".join([j['text'] for j in i]) for i in possible_dates]
-
-	for i in data:
-		try:
-			if(int(i['text'].strip())>1969 and int(i['text'].strip())<2023):
-				front.append(i)
-		except:
-			back.append(i)
-	data = front+back
-	for i in data:
-		if(int(i['top'])<high_top):
-			top = int(i['top'])
-			left = int(i['left'])
-			row = [i]
-			count = len([k for k in data if int(k['top'])>=top-5 and int(k['top'])<=top+5])
-			if(count<(num_cols+2)):
-				for j in data:
-					if(int(j['top'])<high_top):
-						if((int(i['top'])+int(i['left'])+int(i['width']))!=(int(j['top'])+int(j['left'])+int(j['width']))):
-							if(top==int(j['top']) and (left+left_thresh)<int(j['left'])):
-								row.append(j)
-								left = int(j['left'])
-		if len(row)==num_cols:
-			columns = [k['text'].strip() for k in row]
-			return columns
-	return []
+			break
+	if(len(possible_dates)==num_cols):
+		columns = [" ".join([j['text'] for j in i]) for i in possible_dates]
+	else:
+		columns = []
+		for i in data:
+			try:
+				if(int(i['text'].strip())>1969 and int(i['text'].strip())<2023):
+					front.append(i)
+			except:
+				back.append(i)
+		data = front+back
+		for i in data:
+			if(int(i['top'])<high_top):
+				top, left, row = int(i['top']), int(i['left']), [i]
+				count = len([k for k in data if int(k['top'])>=top-5 and int(k['top'])<=top+5])
+				if(count<(num_cols+2)):
+					for j in data:
+						if(int(j['top'])<high_top):
+							if((int(i['top'])+int(i['left'])+int(i['width']))!=(int(j['top'])+int(j['left'])+int(j['width']))):
+								if(top==int(j['top']) and (left+left_thresh)<int(j['left'])):
+									row.append(j)
+									left = int(j['left'])
+			if len(row)==num_cols:
+				columns = [k['text'].strip() for k in row]
+	page_string = " ".join([i['text'].strip().lower() for i in data])
+	markers = [i for i in quarterly_markers if i in page_string]
+	if(len(markers)==num_cols):
+		for i in range(0,num_cols):
+			columns[i] = markers[i] + " " + columns[i]
+	elif(len(markers)>0):
+		if((num_cols/len(markers))==2):
+			count = 0
+			for i in range(0,num_cols-1,2):
+				columns[i] = markers[count] + " " + columns[i]
+				columns[i+1] = markers[count] + " " + columns[i+1]
+				count += 1
+	return columns
 
 def scrape_financials(image_data, page_num):
 	'''scrapes financial data from chosen set of images
@@ -293,8 +302,7 @@ def scrape_financials(image_data, page_num):
 	# start of my hairbrained image_lines scheme
 	image_lines = [[{key: image_data[key][0] for key in ('text','top','left','width')}]]
 	image_lines[0][0]['line_num'] = 0
-	tack_on = []
-	line_num = 1
+	tack_on, line_num = [], 1
 	for i in range(0,len(image_data['text'])):
 		if image_data['left'][i]<300: # define how far out the start of a line can be
 			if(image_data['top'][i]>image_lines[len(image_lines)-1][0]['top']+5):
@@ -494,7 +502,7 @@ def scrape_financials(image_data, page_num):
 	if(len(columns)==0):
 		columns = [i['text'] for i in data[0:num_cols]]
 		data = data[num_cols:]
-	print("/n_______________Final Column Defs: " + ", ".join(columns) + " _______________/n")
+	print("\n_______________Final Column Defs: " + ", ".join(columns) + " _______________\n")
 	for i in range(0,len(data)):
 		data[i]['column'] = columns[(int(data[i]['col_num'])-1)]
 	data = clean_numbers(data)
