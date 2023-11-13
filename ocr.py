@@ -92,8 +92,7 @@ def implement_left_rule(data):
 		-- makes sure data is clustered and there isn't data outside the columns
 		-- practically this would trigger if there's lots of space above or below a word
 	'''
-	left_thresh = 69
-	passed = 0
+	left_thresh, passed = 69, 0
 	for i in range(0,len(data)):
 		text = data[i]['text']
 		try:
@@ -152,8 +151,7 @@ def detect_gaps(data):
 	'''figure out how many columns there are and approximate values to use when grouping in the case/when statement
 	'''
 	lefts = [int(i['left']) for i in data] #ordered list of data from left to right
-	gap_thresh = 69 #any space greater than this must be a column break
-	results = []
+	gap_thresh, results = 69, [] #any space greater than this must be a column break
 	for i in range(0,len(lefts)):
 		if(i<len(lefts)-1):
 			if((int(lefts[i+1])-int(lefts[i])) > gap_thresh):
@@ -208,8 +206,7 @@ def clean_numbers(data):
 	'''
 	for i in range(0,len(data)):
 		if(data[i]['text'].strip()==b'\xe2\x80\x94'.decode('utf-8')):
-			data[i]['text'] = str(0)
-			data[i]['top'] = float(data[i]['top']) - 10
+			data[i]['text'], data[i]['top'] = str(0), float(data[i]['top']) - 10
 		elif(data[i]['text'].strip()[0]=="(" and data[i]['text'].strip()[-1]==")"):
 			if(data[i]['text'].replace("(","").replace(")","").replace("0.","").replace(".","").replace(",","").strip().isdigit()):
 				data[i]['text'] = str("—" + data[i]['text'][1:-1])
@@ -220,12 +217,12 @@ def get_column_names(data, num_cols, high_top):
 	calendar_months = ['january','february','march','april','may','june','july','august','september','october','november','december']
 	quarterly_markers = ['three months ended', 'nine months ended', 'twelve months ended', '3 months ended', '9 months ended', '12 months ended']
 	left_thresh = 100
-	front,back = [],[]
-	possible_dates = []
+	front,back,possible_dates = [],[],[]
 	for i in range(0,len(data)):
 		passed = 0
 		for month in calendar_months:
-			if(SequenceMatcher(None, data[i]['text'].lower(), month).ratio()>=.69):
+			ratio = SequenceMatcher(None, data[i]['text'].lower(), month).ratio()
+			if((ratio>=.69 and ratio<1 and data[i]['text'].lower() not in calendar_months) or (month==data[i]['text'].lower())):
 				data[i]['text'] = month
 				passed = 1
 				break
@@ -240,8 +237,20 @@ def get_column_names(data, num_cols, high_top):
 					five_out = str(int(data[i+5]['text'].strip().replace(",","").replace(".","")))
 				except:
 					five_out = "420"
-				if(one_out.isdigit() and two_out.isdigit() and three_out.isdigit() and four_out.isdigit() and five_out.isdigit()):
-					if((int(two_out)>=1969 and int(two_out)<=2022) and (int(three_out)>=1969 and int(three_out)<=2022) and (int(four_out)>=1969 and int(four_out)<=2022) and (int(five_out)>=1969 and int(five_out)<=2022)):
+				try:
+					six_out = str(int(data[i+6]['text'].strip().replace(",","").replace(".","")))
+				except:
+					six_out = "420"
+				try:
+					seven_out = str(int(data[i+7]['text'].strip().replace(",","").replace(".","")))
+				except:
+					seven_out = "420"
+				if(one_out.isdigit() and two_out.isdigit() and three_out.isdigit() and four_out.isdigit() and five_out.isdigit() and six_out.isdigit() and seven_out.isdigit()):
+					if((int(two_out)>=1969 and int(two_out)<=2022) and (int(three_out)>=1969 and int(three_out)<=2022) and (int(four_out)>=1969 and int(four_out)<=2022) and (int(five_out)>=1969 and int(five_out)<=2022) and (int(six_out)>=1969 and int(six_out)<=2022) and (int(seven_out)>=1969 and int(seven_out)<=2022)):
+						possible_dates = [[data[i], data[i+1], data[i+2]],[data[i], data[i+1], data[i+3]],[data[i], data[i+1], data[i+4]], [data[i], data[i+1], data[i+5]],[data[i], data[i+1], data[i+6]],[data[i], data[i+1], data[i+7]]]
+					elif((int(two_out)>=1969 and int(two_out)<=2022) and (int(three_out)>=1969 and int(three_out)<=2022) and (int(four_out)>=1969 and int(four_out)<=2022) and (int(five_out)>=1969 and int(five_out)<=2022) and (int(six_out)>=1969 and int(six_out)<=2022)):
+						possible_dates = [[data[i], data[i+1], data[i+2]],[data[i], data[i+1], data[i+3]],[data[i], data[i+1], data[i+4]], [data[i], data[i+1], data[i+5]],[data[i], data[i+1], data[i+6]]]
+					elif((int(two_out)>=1969 and int(two_out)<=2022) and (int(three_out)>=1969 and int(three_out)<=2022) and (int(four_out)>=1969 and int(four_out)<=2022) and (int(five_out)>=1969 and int(five_out)<=2022)):
 						possible_dates = [[data[i], data[i+1], data[i+2]],[data[i], data[i+1], data[i+3]],[data[i], data[i+1], data[i+4]], [data[i], data[i+1], data[i+5]]]
 					elif((int(two_out)>=1969 and int(two_out)<=2022) and (int(three_out)>=1969 and int(three_out)<=2022) and (int(four_out)>=1969 and int(four_out)<=2022)):
 						possible_dates = [[data[i], data[i+1], data[i+2]],[data[i], data[i+1], data[i+3]],[data[i], data[i+1], data[i+4]]]
@@ -250,6 +259,8 @@ def get_column_names(data, num_cols, high_top):
 					else:
 						possible_dates.append([data[i], data[i+1], data[i+2]])
 				else:
+					if(one_out.isdigit() and two_out.isdigit()):
+						possible_dates.append([data[i], data[i+1], data[i+2]])
 					raise Exception("Skip to next try...")
 			except:
 				pass
