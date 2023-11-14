@@ -52,6 +52,7 @@ def update_in_table(table, update_column, value, conditional, print_indic=False)
 	run_SQL(SQL,'y')
 
 def run_SQL(SQL, commit_indic='n', database=str(os.path.abspath(os.path.dirname(__file__))+"/image_data.db")):
+	print(SQL)
 	conn = sqlite3.connect(database)
 	conn.row_factory = sqlite3.Row
 	c = conn.cursor()

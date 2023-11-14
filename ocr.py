@@ -157,6 +157,8 @@ def save_image_data(image_data):
 	columns = ['text','line_num','left','top','width','height']
 	data_dict = {i:[] for i in columns}
 	for i in range(0,len(image_data['text'])):
+		if(int(image_data['top'][i])<400):
+			print(f"{image_data['top'][i]} {image_data['text'][i]}")
 		if(image_data['text'][i] not in ('',' ',None,'$','§')):
 			image_data['text'][i] = image_data['text'][i].replace("A4","4").replace("G4","34").replace("G6","36")
 			if(len(image_data['text'][i].strip())>1):
@@ -169,6 +171,7 @@ def save_image_data(image_data):
 				data_dict[key].append(str(image_data[key][i]))
 	print('Dumping '+ str(len(data_dict['text'])) + " rows into SQL...") #how long is the dict we're getting out?
 	dict_to_sqlite(data_dict,'image_data')
+	#exit(0)
 	return
 
 def preprocess_image(filename):
@@ -180,17 +183,20 @@ def preprocess_image(filename):
 	kernel = np.ones((1, 1), np.uint8)
 	img = cv2.dilate(img, kernel, iterations=1)
 	img = cv2.erode(img, kernel, iterations=1)
-	lns = cv2.ximgproc.createFastLineDetector(length_threshold=18).detect(img)
+	lns = cv2.ximgproc.createFastLineDetector(length_threshold=25).detect(img)
 	if lns is not None:
 		for ln in lns:
 			(x_start, y_start, x_end, y_end) = [int(i) for i in ln[0]]
-			if(abs(abs(float(y_start))-abs(float(y_end)))<5):
-				cv2.line(img, (x_start-(x_end-x_start), y_start+2), (x_end+2, y_end+2), (255, 255, 255), thickness=6)
+			thickness = int(abs(abs(float(y_start))-abs(float(y_end))))
+			#print(f"THINKNESS: {thickness}")
+			if(thickness<5):
+				cv2.line(img, (x_start, y_start), (x_end, y_end), (255, 255, 255), thickness=thickness+3)
 	return img
 
 def get_image_data(img):
 	filename = str(os.path.abspath(os.path.dirname( __file__ ))+"/temp/{}.png").format(os.getpid())
 	cv2.imwrite(filename, img)
+	#exit(0)
 	image_data = image_to_data(filename, config='--psm 11', output_type = Output.DICT)
 	return image_data, filename
 
@@ -211,8 +217,8 @@ def clean_numbers(data):
 
 def get_column_names(data, num_cols, high_top):
 	calendar_months = ['january','february','march','april','may','june','july','august','september','october','november','december']
-	left_thresh = 100
-	top_thresh=4
+	left_thresh = 100 #can't be within 100 of left
+	top_thresh=4 #can't be the literal top of the page
 	front,back = [],[]
 	for i in range(1,len(data)):
 		if(int(data[i]['top'])<int(data[i-1]['top'])+top_thresh): 
@@ -230,16 +236,20 @@ def get_column_names(data, num_cols, high_top):
 			try:
 				if(data[i+1]['text'].strip().replace(",","").replace(".","").isdigit() and data[i+2]['text'].strip().replace(",","").replace(".","").isdigit()):
 					possible_dates.append([data[i], data[i+1], data[i+2]])
+					print("CARDI B")
 				else:
 					raise Exception("Skip to next try...")
 			except:
 				try:
 					if(data[i+1]['text'].strip().replace(",","").isdigit()):
 						possible_dates.append([data[i], data[i+1]])
+						print("CARDI B..")
 					else:
 						possible_dates.append([data[i]])
+						print("CARDI B HUH")
 				except:
 					possible_dates.append([data[i]])
+					print("CARDI B HUH!!")
 		if(len(possible_dates)==num_cols):
 			print(possible_dates)
 			entertain_data = [i for i in data if int(i['top'])>int(possible_dates[0][0]['top']) and int(i['top'])<=int(possible_dates[0][0]['top'])+50]
@@ -289,19 +299,19 @@ def get_column_names(data, num_cols, high_top):
 	return []
 
 def scrape_financials(image_data, page_num):
-	'''scrapes financial data from chosen set of images
-	'''
-	save_image_data(image_data) #throw into SQL
-	SQL = """select * from image_data where text<>'' and text is not null and text<>' ';"""
+	#send raw data to SQL
+	save_image_data(image_data)
+
+	# start of my hairbrained image_lines scheme...
+	SQL = """select * from image_data where text<>'' and text is not null and text<>' ' order by cast(top as 'decimal');"""
 	image_data = list_to_dict(clean_numbers(run_SQL(SQL)))
-	# start of my hairbrained image_lines scheme
 	image_lines = [[{key: image_data[key][0] for key in ('text','top','left','width')}]]
 	image_lines[0][0]['line_num'] = 0
 	tack_on = []
 	line_num = 1
 	for i in range(0,len(image_data['text'])):
-		if image_data['left'][i]<300: # define how far out the start of a line can be
-			if(image_data['top'][i]>image_lines[len(image_lines)-1][0]['top']+5):
+		if image_data['left'][i]<300: # variable names must be within 300
+			if(image_data['top'][i]>image_lines[len(image_lines)-1][0]['top']+5): # new lines must be at least 5 apart
 				line = {key: image_data[key][i] for key in ('text','top','left','width','line_num')}
 				line['line_num'] = line_num
 				line_num+=1
@@ -317,7 +327,7 @@ def scrape_financials(image_data, page_num):
 	for i in range(0,len(image_lines[-1])):
 		image_lines[-1][i]['line_num'] = max_line_num
 
-	# group data into lines, sort left to right
+	# reassign line numbers, group left to right, split apart numeric values from text
 	for i in range(0,100):	
 		image_lines, passed = group_by_lines(image_lines)
 		image_lines = fix_image_lines(image_lines)
@@ -325,15 +335,11 @@ def scrape_financials(image_data, page_num):
 			break
 	for i in range(0,len(image_lines)):
 		image_lines[i] = sorted(image_lines[i], key = lambda var: var['left'])
-
-	top_data = image_lines[0]+image_lines[1]
-
 	for i in range(0,len(image_lines)):
 		top_list = [k['top'] for k in image_lines[i]]
 		top_range = [min(top_list),max(top_list)]
 		image_lines[i] = {'text': [k['text'].replace("$","").replace(",","").strip().lower() for k in image_lines[i] if len(k['text'].replace("$","").strip().lower())>0],
 							'top': top_range, 'page_num': str(page_num+1)}
-
 	for i in range(0,len(image_lines)):
 		values = []
 		variable = ""
@@ -344,17 +350,19 @@ def scrape_financials(image_data, page_num):
 				variable += " " + str(j)
 		image_lines[i]['variable'] = variable.replace("\"","").replace("§","")
 		image_lines[i]['values'] = values
-		
-	num_cols = most_frequent([len(i['values']) for i in image_lines if len(i['values'])>0])
+	
+	# deduce # of columns and rows
 	num_rows = len(image_lines)
-	print(str(num_rows) + " rows and " + str(num_cols) + " columns being initialized:")
+	#print(str(num_rows) + " rows and " + str(num_cols) + " columns being initialized:")
 
-	# bring in page number and line number
+	# add page and line numbers to the data
 	SQL = """drop table if exists image_data_1;"""
 	run_SQL(SQL, commit_indic='y')
 	SQL = """
 		create table image_data_1 as
-		select cast(left as 'decimal') as left, text, cast(top as 'decimal') as top, cast(width as 'decimal') as width,
+		select cast(left as 'decimal') as left, text, cast(top as 'decimal') as top, 
+		cast(width as 'decimal') as width, cast(left as 'decimal') + cast(width as 'decimal') as right,
+		cast(cast(left as 'decimal') + cast(width as 'decimal') as 'decimal')-((cast(cast(left as 'decimal') + cast(width as 'decimal') as 'decimal')-cast(left as 'decimal'))/2) as midpoint,
 		case
 		"""
 	for i in range(0,len(image_lines)):
@@ -366,7 +374,7 @@ def scrape_financials(image_data, page_num):
 		"""
 	run_SQL(SQL, commit_indic='y')
 
-	# bring in variable names (1:1 with line_num)
+	# add variable names to data
 	SQL = """select * from image_data_1 where line_num is not null;"""
 	data = run_SQL(SQL)
 	for i in range(0,len(data)):
@@ -385,7 +393,7 @@ def scrape_financials(image_data, page_num):
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"image_data_2")
 
-	# cut off stuff on the far left of the page
+	# since we have variable names now, throw out left quarter of the page
 	SQL = """drop table if exists image_data_3;"""
 	run_SQL(SQL, commit_indic='y')
 	SQL = """
@@ -404,12 +412,12 @@ def scrape_financials(image_data, page_num):
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"image_data_4")
 
-	# remove non-numeric data below a certain threshold on the page
+	# remove non-numeric data (unless it's in the top half of the page)
 	SQL = """select * from image_data_4;"""
 	data = run_SQL(SQL)
 	high_top = [i['top'] for i in sorted(data, key=lambda row: int(row['top']))]
 	high_top = int(high_top[int(len(high_top)/2)])
-	data = [i for i in data if i['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").replace("-","").replace("0.","").strip().lower().replace(".","").isdigit() or int(i['top'])<=high_top]
+	data = [i for i in data if i['text'].replace(",","").replace("$","").replace("(","").replace(")","").replace(" ","").replace("-","").replace("0.","").strip().lower().replace(".","").replace("%","").isdigit() or int(i['top'])<=high_top]
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"image_data_5")
 
@@ -421,6 +429,7 @@ def scrape_financials(image_data, page_num):
 		current_top = int(data[i]['top'])
 		min_top = min([int(j['top']) for j in data if j['line_num']==line_num])
 		if(abs(current_top-min_top)>20):
+			print("HUH WHATS GOING ON HERE?????")
 			data[i]['line_num'] = str(int(data[i]['line_num']) + 420)
 	data_dict = list_to_dict(data)
 	dict_to_sqlite(data_dict,"image_data_6")
@@ -440,7 +449,41 @@ def scrape_financials(image_data, page_num):
 	dict_to_sqlite(list_to_dict(data),"image_data_7")
 
 	# throw out lines where # of data points exceeds # columns
-	SQL = """
+	
+	#for i in range(0,2000):
+	#	SQL = f"insert into left_pixels (pixel) values ({i});"
+	#	run_SQL(SQL, commit_indic='y')
+
+	SQL = f"""
+			select * from (
+			select distinct pixel, count(*) as count from(
+			select * from left_pixels 
+			cross join
+			(select * from image_data_7)
+			where pixel between cast(left as 'decimal') and (cast(left as 'decimal')+cast(width as 'decimal')))
+			group by pixel)
+			where count>={int(num_rows/2)}
+			order by pixel asc;		
+		"""
+	pixel_counts = run_SQL(SQL)
+	ranges = []
+	top_range = pixel_counts[0]['pixel']
+	bot_range = pixel_counts[0]['pixel']
+	for i in range(1,len(pixel_counts)):
+		if(pixel_counts[i-1]['pixel']+35<pixel_counts[i]['pixel']):
+			top_range = pixel_counts[i-1]['pixel']
+			ranges.append((bot_range-10, top_range+10))
+			bot_range = pixel_counts[i]['pixel']
+		elif(i==len(pixel_counts)-1):
+			top_range = pixel_counts[i]['pixel']
+			ranges.append((bot_range-10, top_range+10))
+		else:
+			pass
+	
+	num_cols = len(ranges)
+	print(f"found {num_cols} columns!")
+
+	SQL = f"""
 	insert into garbage
 	select * from image_data_7 where line_num in (
 	select distinct line_num from (
@@ -448,8 +491,8 @@ def scrape_financials(image_data, page_num):
 	from image_data_7
 	group by line_num 
 	order by count(*) asc)
-	where count>"""+str(num_cols)+""")
-	or text not GLOB '*[0-9]*'
+	where count>{str(num_cols)})
+	or (text not GLOB '*[0-9]*' and text not like '%\%%' escape '\\' and text not like '%-%')
 	or cast(line_num as 'decimal')>=420;
 	"""
 	run_SQL(SQL, commit_indic='y')
@@ -462,7 +505,7 @@ def scrape_financials(image_data, page_num):
 	"""
 	dict_to_sqlite(list_to_dict(run_SQL(SQL)),"image_data_8")
 
-	# part 3 of removing floating data
+	# re-run floating data logic
 	SQL = """select * from image_data_8 order by cast(left as 'decimal') asc;"""
 	data = run_SQL(SQL)
 	data = implement_left_rule(data)
@@ -470,24 +513,41 @@ def scrape_financials(image_data, page_num):
 	dict_to_sqlite(data_dict,"image_data_9")
 
 	# bring in column numbers
-	SQL = """select distinct text, left, top from image_data_9 order by cast(left as 'decimal') asc;"""
-	data = run_SQL(SQL)
-	results = [0] + detect_gaps(data)
+	#SQL = """select distinct text, left, top from image_data_9 order by cast(left as 'decimal') asc;"""
+	#data = run_SQL(SQL)
+	#results = [0] + detect_gaps(data)
 	SQL = """drop table if exists image_data_10;"""
 	run_SQL(SQL, commit_indic='y')
 	SQL = """
 		create table image_data_10 as
-		select distinct variable, text, left, top, width, line_num, page_num, case
+		select distinct variable, text, left, top, width, line_num, page_num, midpoint, case
 		"""
 	counter = 1
-	for i in range(0,len(results)-1):
-		SQL += " when cast(left as 'decimal') between " + str(results[i]) + " and " + str(results[i+1]) + " then "+str(counter)
+	for i in range(0,len(ranges)):
+		SQL += " when cast(midpoint as 'decimal') between " + str(ranges[i][0]) + " and " + str(ranges[i][1]) + " then "+str(i+1)
 		counter+=1
-	SQL += " when cast(left as 'decimal')>=" + str(results[-1]) + " then "+str(counter)
+	#SQL += " when cast(left as 'decimal')>=" + str(results[-1]) + " then "+str(i+1)
 	SQL += """ end as col_num
 		from image_data_9;
 		"""
 	run_SQL(SQL, commit_indic='y')
+
+	SQL = """drop table if exists image_data_cols;"""
+	run_SQL(SQL, commit_indic='y')
+	SQL = """
+		create table image_data_cols as
+		select distinct text, left, right, midpoint, top, midpoint, page_num, line_num, case
+		"""
+	counter = 1
+	for i in range(0,len(ranges)):
+		SQL += " when cast(right as 'decimal') between " + str(ranges[i][0]-80) + " and " + str(ranges[i][1]) + " then "+str(i+1)
+		counter+=1
+	#SQL += " when cast(left as 'decimal')>=" + str(results[-1]) + " then "+str(i+1)
+	SQL += """ end as col_num
+		from image_data_1;
+		"""
+	run_SQL(SQL, commit_indic='y')
+	#exit(0)
 
 	# force top value to be constant for each line
 	SQL = """
@@ -504,11 +564,29 @@ def scrape_financials(image_data, page_num):
 
 	# bring in column names
 	data = run_SQL("select * from image_data_10 order by cast(top as 'decimal') asc, cast(left as 'decimal');")	
-	garbage = run_SQL("select * from garbage order by cast(top as 'decimal'), cast(left as 'decimal');")
-	columns = get_column_names(garbage, num_cols, int(high_top))
-	if(len(columns)==0):
-		columns = [i['text'] for i in data[0:num_cols]]
-		data = data[num_cols:]
+	#garbage = run_SQL("select * from garbage order by cast(top as 'decimal'), cast(left as 'decimal');")
+	#columns = get_column_names(garbage, num_cols, int(high_top))
+	SQL = f"""
+			select distinct col_num, group_concat(text, " ") as column from image_data_cols 
+			where line_num<=1 and (printf("%d", replace(text,",",""))<>replace(text,",","") or (text like '%20%' or text like '%19%'))
+			and col_num
+			group by col_num
+			order by col_num;
+		"""
+	column_data = run_SQL(SQL)
+	columns = []
+	for i in range(1, num_cols+1):
+		passs=0
+		for j in column_data:
+			if i==j['col_num']:
+				columns.append(j['column'])
+				passs=1
+		if passs==0:
+			columns.append("UNKNOWN")
+				
+
+	print(columns)
+
 	print("_______________Final Column Defs: " + ", ".join(columns) + " _______________")
 	for i in range(0,len(data)):
 		data[i]['column'] = columns[(int(data[i]['col_num'])-1)]
