@@ -62,9 +62,9 @@ def group_lines(image_lines):
 		for j in range(0,len(image_lines[i])):
 			first_top = image_lines[i][0]['top']
 			if((image_lines[i][j]['top']+5<first_top)):
-					if(image_lines[i][j]['line_num']>0):
-						image_lines[i][j]['line_num'] -= 1
-						passed = 1
+				if(image_lines[i][j]['line_num']>0):
+					image_lines[i][j]['line_num'] -= 1
+					passed = 1
 	return image_lines, passed
 
 def fix_lines(image_lines):
@@ -277,8 +277,8 @@ def get_column_names(data, num_cols, high_top):
 								if(top==int(j['top']) and (left+left_thresh)<int(j['left'])):
 									row.append(j)
 									left = int(j['left'])
-			if len(row)==num_cols:
-				columns = [k['text'].strip() for k in row]
+				if len(row)==num_cols:
+					columns = [k['text'].strip() for k in row]
 	page_string = " ".join([i['text'].strip().lower() for i in data])
 	markers = [i for i in quarterly_markers if i in page_string]
 	if(len(markers)==num_cols):
